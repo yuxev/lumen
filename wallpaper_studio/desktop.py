@@ -192,6 +192,9 @@ class Desktop:
         GLib.io_add_watch(XConnectionNumber(self.dpy), GLib.IO_IN, self.drain)
         GLib.idle_add(self.refresh)
         GLib.timeout_add_seconds(2, self.watch_video)
+        # auto light/dark follows the system setting: recolour as soon as it's flipped
+        self.interface = Gio.Settings.new("org.gnome.desktop.interface")
+        self.interface.connect("changed::color-scheme", lambda *_: GLib.timeout_add(300, self.follow_scheme))
         GLib.timeout_add_seconds(60, self.tick)
         GLib.idle_add(lambda: self.tick() and False)     # once at start; an idle that returns True spins
 
@@ -287,7 +290,7 @@ class Desktop:
     # --- schedule ----------------------------------------------------------------------
 
     def tick(self):
-        """Once a minute: time for the next wallpaper, or for light/dark to flip?"""
+        """Once a minute: time for the next wallpaper, or a light/dark change that was missed?"""
         if self.busy is not None and self.busy.poll() is None:
             return True
         config, state = core.load_config(), core.load_state()
@@ -298,6 +301,14 @@ class Desktop:
         elif state.get("palette") and state.get("mode") != core.effective_mode(config):
             self.run("apply")
         return True
+
+    def follow_scheme(self):
+        state = core.load_state()
+        if state.get("palette") and state.get("mode") != core.effective_mode():
+            if self.busy is not None and self.busy.poll() is None:
+                return True      # a change is still running: look again shortly
+            self.run("apply")
+        return False
 
     def run(self, command):
         # in a child process: a video's still frame can take a few seconds to read

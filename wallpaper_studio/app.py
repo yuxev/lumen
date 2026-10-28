@@ -179,8 +179,7 @@ class Window(Adw.ApplicationWindow):
 
         look = Adw.PreferencesGroup(title="Colours")
         mode_row = Adw.ActionRow(title="Light or dark",
-                                 subtitle=f"Auto is light from {self.config['light_from']:02d}:00 "
-                                          f"and dark from {self.config['dark_from']:02d}:00")
+                                 subtitle="Auto follows your system's style (Settings → Appearance)")
         modes = Gtk.Box(css_classes=["linked"], valign=Gtk.Align.CENTER)
         first = None
         for mode, label in (("light", "Light"), ("dark", "Dark"), ("auto", "Auto")):
@@ -193,7 +192,6 @@ class Window(Adw.ApplicationWindow):
         look.add(self.switch_row("See-through windows", "Let the wallpaper show behind app windows", "glass"))
         look.add(self.switch_row("Recolour the Terminal", "Adds a “Wallpaper Studio” profile to GNOME Terminal",
                                  "terminal"))
-        look.add(self.switch_row("Lock screen", "Show the wallpaper when the screen is locked", "lock_screen"))
         box.append(look)
 
         auto = Adw.PreferencesGroup(title="Change automatically",

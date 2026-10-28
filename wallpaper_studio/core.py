@@ -45,14 +45,11 @@ IMAGE_EXT = (".jpg", ".jpeg", ".png", ".webp", ".jxl", ".bmp", ".tif", ".tiff", 
 VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov", ".m4v", ".avi")
 
 DEFAULT_CONFIG = {
-    "mode": "auto",                 # light | dark | auto (follows the clock)
-    "light_from": 7,                # auto mode: light from 07:00 ...
-    "dark_from": 19,                # ... dark from 19:00
+    "mode": "auto",                 # light | dark | auto (follows the system's light/dark style)
     "folder": BUILT_IN,
     "rotate_hours": 0,              # 0 = never change by itself
     "glass": False,                 # see-through windows
     "terminal": True,               # recolour GNOME Terminal
-    "lock_screen": True,            # use the wallpaper on the lock screen
 }
 
 # settings we touch, saved once before the first change so Restore can put them back
@@ -314,7 +311,9 @@ def effective_mode(config=None):
     config = config or load_config()
     if config["mode"] in ("light", "dark"):
         return config["mode"]
-    return "light" if config["light_from"] <= time.localtime().tm_hour < config["dark_from"] else "dark"
+    # auto: whatever the system is set to (Settings → Appearance, or the quick settings toggle)
+    scheme = Gio.Settings.new("org.gnome.desktop.interface").get_string("color-scheme")
+    return "dark" if scheme == "prefer-dark" else "light"
 
 
 THEMES_DIR = os.path.join(HOME, ".local/share/themes")
@@ -417,13 +416,6 @@ def _terminal_profile(p):
         _dconf("write", path + key, value)
 
 
-def _lock_screen(still):
-    if _set("org.gnome.desktop.screensaver", "picture-uri", GLib.Variant("s", Gio.File.new_for_path(still).get_uri())):
-        # the 42 school lock screen reads the picture when its helper starts
-        subprocess.run(["systemctl", "--user", "try-restart", "codam-web-greeter.service"],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-
-
 def apply_theme():
     """Recolour the session from the current wallpaper, in the current light/dark mode."""
     with locked():
@@ -443,13 +435,12 @@ def apply_theme():
         _remove_import(os.path.join(HOME, ".config", "gtk-3.0", "gtk.css"))
         _add_import(os.path.join(HOME, ".config", "gtk-4.0", "gtk.css"))
 
-        _set("org.gnome.desktop.interface", "color-scheme", GLib.Variant("s", "prefer-dark" if dark else "default"))
+        if config["mode"] != "auto":     # in auto the system's own setting decides, so leave it alone
+            _set("org.gnome.desktop.interface", "color-scheme", GLib.Variant("s", "prefer-dark" if dark else "default"))
         _switch_theme()
         _set("org.gnome.desktop.background", "primary-color", GLib.Variant("s", p["paper"]))
         if config["terminal"] and shutil.which("dconf"):
             _terminal_profile(p)
-        if config["lock_screen"] and state.get("still"):
-            _lock_screen(state["still"])
         Gio.Settings.sync()
 
         state["mode"] = mode

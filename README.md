@@ -7,7 +7,7 @@ Pick a wallpaper and your whole desktop takes its colours.
 *Picking a wallpaper recolours the desktop and every open app on the spot. [Full-quality video](docs/demo.webm).*
 
 - **Wallpapers:** pictures or looping videos, chosen from a folder of yours, with an optional new one every few hours.
-- **Colours:** apps, GNOME Terminal and the lock screen are recoloured to match, in light, dark, or auto (light by day, dark at night).
+- **Colours:** apps and GNOME Terminal are recoloured to match, in light, dark, or auto (follows your system's light/dark style).
 - **One click back:** *Restore original look* puts every setting back the way it was.
 
 Made for the 42 iMacs (Ubuntu 22.04, GNOME, X11), where the normal desktop picture setting is locked.
@@ -15,7 +15,7 @@ No sudo needed.
 
 ![The same wallpaper in light mode (left) and dark mode (right)](docs/light-dark.png)
 
-*One wallpaper, two looks: light by day, dark at night (or pick one).*
+*One wallpaper, two looks: light and dark.*
 
 ## Install
 
@@ -44,9 +44,9 @@ cd wallpaper-studio
    *Change folder…* points it at your own pictures and videos instead.
 2. **Click a wallpaper.** The desktop changes and every open app takes its colours within a second.
    You can also drop a picture onto the window, or use *Open a file…*.
-3. **Choose light, dark or auto** under *Colours*. Auto is light from 07:00 and dark from 19:00.
-4. **Optional:** a new random wallpaper every few hours, see-through windows, the wallpaper on your
-   lock screen, and *Keep screen awake* while you read or watch something.
+3. **Choose light, dark or auto** under *Colours*. Auto follows your system's style (Settings → Appearance).
+4. **Optional:** a new random wallpaper every few hours, see-through windows, and *Keep screen awake*
+   while you read or watch something.
 
 To undo everything, open the menu (⋮) and choose *Restore original look*.
 
@@ -98,7 +98,7 @@ wallpaper-studio                  open the window
 wallpaper-studio set FILE         use a picture or video
 wallpaper-studio next             a random different one from your folder
 wallpaper-studio light|dark|auto  colour mode
-wallpaper-studio awake [MINUTES|on|off]   keep the screen from locking (default 60 minutes)
+wallpaper-studio awake [MINUTES|on|off]   keep your session active so it doesn't lock (default 60 minutes)
 wallpaper-studio stop             stop everything (stays off after logging in again); nothing is uninstalled
 wallpaper-studio start            start it again (opening the app does too)
 wallpaper-studio restore          undo everything
@@ -120,8 +120,8 @@ It restores your original look first, then removes the app.
 | Part | What it does |
 |---|---|
 | `wallpaper_studio/palette.py` | Reads the picture at a tiny size and picks an accent colour (the picture's most vivid colour that stands out) plus neutrals tinted with its overall colour, in a light and a dark set. |
-| `wallpaper_studio/core.py` | Applies them: a small GTK theme ("Wallpaper Studio A"/"B" in `~/.local/share/themes`, adw-gtk3 underneath plus your colours), the light/dark setting, a GNOME Terminal profile, and the lock-screen picture. Saves your original settings first. GTK only re-reads a theme when its name changes, so each recolour flips between the two identical copies and open apps restyle live. |
-| `wallpaper_studio/desktop.py` | A small helper started at login. GNOME's own wallpaper is locked at 42, so it draws the wallpaper in a desktop window behind everything. Pictures cost almost nothing once drawn. Videos play through VLC and pause when a window is maximised or the screen is locked. It also handles the rotation timer and the auto light/dark switch. |
+| `wallpaper_studio/core.py` | Applies them: a small GTK theme ("Wallpaper Studio A"/"B" in `~/.local/share/themes`, adw-gtk3 underneath plus your colours), the light/dark setting and a GNOME Terminal profile. Saves your original settings first. GTK only re-reads a theme when its name changes, so each recolour flips between the two identical copies and open apps restyle live. |
+| `wallpaper_studio/desktop.py` | A small helper started at login. GNOME's own wallpaper is locked at 42, so it draws the wallpaper in a desktop window behind everything. Pictures cost almost nothing once drawn. Videos play through VLC and pause when a window is maximised or the screen is locked. It also handles the rotation timer, follows the system's light/dark switch in auto mode, and keeps the session active while *Keep screen awake* is on (GNOME's idle inhibitor, plus a 1-pixel pointer nudge every 50 s, since some locks only count real input). |
 | `wallpaper_studio/app.py` | The window (GTK 4 + libadwaita). |
 
 Everything it writes lives in `~/.config/wallpaper-studio`, `~/.cache/wallpaper-studio` and
