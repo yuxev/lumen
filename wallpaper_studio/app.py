@@ -443,7 +443,10 @@ class App(Adw.Application):
         self.css_monitor = Gio.File.new_for_path(core.THEME_CSS).monitor_file(Gio.FileMonitorFlags.NONE, None)
         self.css_monitor.connect("changed", lambda *_: GLib.timeout_add(150, self.reload_user_css))
         self.reload_user_css()
-        core.start_helper()
+        quit_action = Gio.SimpleAction.new("quit", None)     # used by `wallpaper-studio stop`
+        quit_action.connect("activate", lambda *_: self.quit())
+        self.add_action(quit_action)
+        core.start()     # opening the app undoes `wallpaper-studio stop`
 
     def reload_user_css(self):
         gtk_css = os.path.join(core.HOME, ".config", "gtk-4.0", "gtk.css")

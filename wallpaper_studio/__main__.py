@@ -7,6 +7,9 @@
     wallpaper-studio awake [MINUTES|on|off]
                                      keep the screen from locking while you read or watch
                                      (default 60 minutes; "on" lasts until you turn it off or log out)
+    wallpaper-studio stop            stop everything (the wallpaper, rotation, keep-awake, the window)
+                                     until you start it again; nothing is uninstalled
+    wallpaper-studio start           start it again
     wallpaper-studio restore         put your desktop back the way it was
     wallpaper-studio desktop         the background helper (started at login)
 """
@@ -32,10 +35,12 @@ def main(argv):
     try:
         if command == "set" and len(argv) > 2:
             core.set_wallpaper(argv[2])
+            core.start()
         elif command == "next":
             if core.next_wallpaper() is None:
                 print("wallpaper-studio: no other pictures in", core.load_config()["folder"], file=sys.stderr)
                 return 1
+            core.start()
         elif command in ("light", "dark", "auto"):
             core.save_config(mode=command)
             core.apply_theme()
@@ -55,6 +60,13 @@ def main(argv):
             else:
                 print("usage: wallpaper-studio awake [MINUTES|on|off]", file=sys.stderr)
                 return 1
+        elif command == "stop":
+            core.stop()
+            print("Wallpaper Studio stopped. Your colours stay as they are; nothing was uninstalled.\n"
+                  "It stays off after logging in again. Run 'wallpaper-studio start' (or open the app) to bring it back.")
+        elif command == "start":
+            core.start()
+            print("Wallpaper Studio started.")
         elif command == "restore":
             core.restore()
         else:

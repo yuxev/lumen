@@ -98,8 +98,14 @@ wallpaper-studio                  open the window
 wallpaper-studio set FILE         use a picture or video
 wallpaper-studio next             a random different one from your folder
 wallpaper-studio light|dark|auto  colour mode
+wallpaper-studio awake [MINUTES|on|off]   keep the screen from locking (default 60 minutes)
+wallpaper-studio stop             stop everything (stays off after logging in again); nothing is uninstalled
+wallpaper-studio start            start it again (opening the app does too)
 wallpaper-studio restore          undo everything
 ```
+
+The installer adds a `wallpaper-studio` alias to bash, zsh and fish, so the command works in every new
+terminal. In the terminal you installed from, run `source ~/.bashrc` (or `~/.zshrc`) first.
 
 ## Uninstall
 

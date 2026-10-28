@@ -13,6 +13,7 @@ import json
 import os
 import random
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,7 @@ STATE = os.path.join(CONFIG_DIR, "state.json")
 ORIGINALS = os.path.join(CONFIG_DIR, "originals.json")
 THEME_CSS = os.path.join(CONFIG_DIR, "theme.css")
 HOOKS = os.path.join(CONFIG_DIR, "hooks")
+STOPPED = os.path.join(CONFIG_DIR, "stopped")   # `wallpaper-studio stop` leaves this until `start`
 LOCK = os.path.join(CONFIG_DIR, ".lock")
 HELPER_LOCK = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "wallpaper-studio.lock")
 # lives in the session's runtime folder, which is emptied at logout: "keep awake" never outlives a session
@@ -147,7 +149,45 @@ def keep_awake(minutes):
     The desktop helper holds GNOME's own idle inhibitor, as video players do; it ends at logout."""
     until = None if minutes is None else FOREVER if minutes == FOREVER else time.time() + minutes * 60
     _write(AWAKE, json.dumps({"until": until, "minutes": minutes}) + "\n")
+    if minutes is not None:
+        start()          # the helper holds the inhibitor
+
+
+def start():
+    """Run again after `stop`: the wallpaper, rotation and light/dark come back, also at every login."""
+    with contextlib.suppress(FileNotFoundError):
+        os.remove(STOPPED)
     start_helper()
+
+
+def stop():
+    """Stop everything that runs (the wallpaper on the desktop, rotation, keep-awake, the window) without
+    uninstalling. It stays stopped, even after logging in again, until `start` or opening the app.
+    Returns whether anything was running."""
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    open(STOPPED, "w").close()
+    was_running = False
+    try:     # the window, if it's open
+        Gio.bus_get_sync(Gio.BusType.SESSION, None).call_sync(
+            "io.github.WallpaperStudio", "/io/github/WallpaperStudio", "org.gtk.Actions", "Activate",
+            GLib.Variant("(sava{sv})", ("quit", [], {})), None, Gio.DBusCallFlags.NO_AUTO_START, 2000, None)
+        was_running = True
+    except GLib.Error:
+        pass
+    try:     # the desktop helper keeps its process id in its lock file
+        with open(HELPER_LOCK) as f:
+            pid = int(f.read().strip() or 0)
+    except (OSError, ValueError):
+        pid = 0
+    if pid and helper_running():
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(pid, signal.SIGTERM)
+            was_running = True
+        for _ in range(50):
+            if not helper_running():
+                break
+            time.sleep(0.1)
+    return was_running
 
 
 def start_helper():

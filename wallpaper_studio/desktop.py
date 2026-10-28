@@ -488,6 +488,12 @@ def main():
             time.sleep(0.1)
     else:
         return 0          # another helper is running
+    if os.path.exists(core.STOPPED):
+        return 0          # `wallpaper-studio stop`: stay off, even at login, until `start`
+    lock.seek(0)
+    lock.truncate()
+    lock.write(f"{os.getpid()}\n")    # so `wallpaper-studio stop` knows whom to stop
+    lock.flush()
     desktop = Desktop()
     signal.signal(signal.SIGTERM, lambda *_: (desktop.stop_video(), os._exit(0)))
     GLib.MainLoop().run()

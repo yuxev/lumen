@@ -87,6 +87,23 @@ NoDisplay=true
 X-GNOME-Autostart-enabled=true
 DESKTOP
 
+# the wallpaper-studio command in every new terminal, even where ~/.local/bin isn't on PATH
+# (zsh never adds it, and bash only does at login if the folder already existed)
+MARK_BEGIN="# >>> wallpaper-studio >>>"
+MARK_END="# <<< wallpaper-studio <<<"
+add_alias() {
+	local rc=$1
+	[ -f "$rc" ] && sed -i "/^$MARK_BEGIN\$/,/^$MARK_END\$/d" "$rc"
+	[ -s "$rc" ] && [ -n "$(tail -c1 "$rc")" ] && echo >>"$rc"   # don't glue onto a last line without a newline
+	printf '%s\nalias wallpaper-studio="%s"\n%s\n' "$MARK_BEGIN" "$DEST/wallpaper-studio" "$MARK_END" >>"$rc"
+}
+add_alias "$HOME/.bashrc"
+if [ -f "$HOME/.zshrc" ] || command -v zsh >/dev/null; then add_alias "$HOME/.zshrc"; fi
+if command -v fish >/dev/null; then
+	mkdir -p "$HOME/.config/fish/conf.d"
+	printf 'alias wallpaper-studio "%s"\n' "$DEST/wallpaper-studio" >"$HOME/.config/fish/conf.d/wallpaper-studio.fish"
+fi
+
 # --- GTK 3 theme --------------------------------------------------------------------
 if [ ! -d "$HOME/.local/share/themes/adw-gtk3" ] && [ ! -d /usr/share/themes/adw-gtk3 ]; then
 	say "Downloading the adw-gtk3 theme ($ADW_GTK3)"
@@ -106,3 +123,4 @@ gtk-update-icon-cache -q -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || tr
 (setsid "$DEST/wallpaper-studio" desktop >/dev/null 2>&1 &)
 
 say "Done (using $PYTHON). Open “Wallpaper Studio” from your apps, or run: wallpaper-studio"
+echo "The wallpaper-studio command works in new terminals (in this one, run: source ~/.bashrc, or ~/.zshrc)."
