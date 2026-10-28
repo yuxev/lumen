@@ -103,6 +103,10 @@ class XEvent(ctypes.Union):
 
 XSendEvent = _sig("XSendEvent", ctypes.c_int, P, XID, ctypes.c_int, ctypes.c_long, ctypes.POINTER(XEvent))
 XSelectInput = _sig("XSelectInput", ctypes.c_int, P, XID, ctypes.c_long)
+XTest = ctypes.CDLL(ctypes.util.find_library("Xtst"))
+XTest.XTestFakeRelativeMotionEvent.restype = ctypes.c_int
+XTest.XTestFakeRelativeMotionEvent.argtypes = [P, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
+NUDGE_SECONDS = 50       # idle checks typically look once a minute
 CLIENT_MESSAGE = 33
 PROPERTY_NOTIFY = 28
 PROPERTY_CHANGE_MASK = 1 << 22
@@ -164,6 +168,7 @@ class Desktop:
         self.busy = None             # a rotation or light/dark change running in the background
         self.inhibit_cookie = None   # held while "keep screen awake" is on
         self.awake_timer = 0
+        self.nudge_timer = 0         # pointer nudges while "keep screen awake" is on
         try:
             self.session = Gio.DBusProxy.new_for_bus_sync(
                 Gio.BusType.SYSTEM, Gio.DBusProxyFlags.NONE, None, "org.freedesktop.login1",
@@ -225,10 +230,30 @@ class Desktop:
         until = core.awake_until()
         if until is None:
             self.uninhibit()
+            if self.nudge_timer:
+                GLib.source_remove(self.nudge_timer)
+                self.nudge_timer = 0
             return False
         self.inhibit()
+        if not self.nudge_timer:
+            self.nudge()
+            self.nudge_timer = GLib.timeout_add_seconds(NUDGE_SECONDS, self.nudge)
         if until != core.FOREVER:
             self.awake_timer = GLib.timeout_add_seconds(max(1, int(until - time.time()) + 1), self.sync_awake)
+        return False
+
+    def nudge(self):
+        """Move the pointer 1 px and straight back. GNOME's inhibitor only stops GNOME going idle; a
+        lock that reads the X server's own idle time (time since the last input) needs real input,
+        and XTest input counts as real."""
+        XTest.XTestFakeRelativeMotionEvent(self.dpy, 1, 0, 0)
+        XFlush(self.dpy)
+        GLib.timeout_add(50, self.nudge_back)
+        return True
+
+    def nudge_back(self):
+        XTest.XTestFakeRelativeMotionEvent(self.dpy, -1, 0, 0)
+        XFlush(self.dpy)
         return False
 
     def session_manager(self):

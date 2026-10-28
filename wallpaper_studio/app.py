@@ -230,14 +230,14 @@ class Window(Adw.ApplicationWindow):
             self.awake_row.set_subtitle("The screen locks after you've been away for a while, as usual")
         elif until == core.FOREVER:
             self.awake_row.set_selected(len(AWAKE_CHOICES) - 1)
-            self.awake_row.set_subtitle("On until you turn it off or log out. Lock it yourself (Super+L) "
-                                        "when you walk away")
+            self.awake_row.set_subtitle("Your session counts as active until you turn it off or log out. "
+                                        "Lock it yourself (Super+L) when you walk away")
         else:
             choices = [m for m, _l in AWAKE_CHOICES]
             minutes = core.awake_minutes()
             self.awake_row.set_selected(choices.index(minutes) if minutes in choices else 2)
             self.awake_row.set_subtitle(GLib.DateTime.new_from_unix_local(int(until)).format(
-                "On until %H:%M. Lock it yourself (Super+L) when you walk away"))
+                "Your session counts as active until %H:%M. Lock it yourself (Super+L) when you walk away"))
         self.showing_awake = False
         return True
 
