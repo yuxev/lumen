@@ -193,6 +193,7 @@ class Desktop:
         self.links = {}              # window -> the window it's kept above (WM_TRANSIENT_FOR set)
         self.card = None             # the logtime card, while it's on (logtime.py)
         self.faded = {}              # window -> its opacity, for apps the glass theme can't reach
+        self.shell_checked = False   # whether GNOME Shell was checked for the wallpaper, this login
         self.logtime_pending = 0
         self.restacks = []           # recent restack times, to back off if something fights back
         self.restack_pending = 0
@@ -384,7 +385,10 @@ class Desktop:
             return False
         self.shown = (target, still, width, height)
         if still and os.path.exists(still):
-            core.shell_background(still)        # the overview's wallpaper too (from the next login)
+            core.shell_background(still)        # the overview's wallpaper too
+            if not self.shell_checked:          # right after installing: now, not from the next login
+                self.shell_checked = True
+                core.shell_picks_up_background()
 
         if target is None:
             self.stop_video()

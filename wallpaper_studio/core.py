@@ -317,6 +317,30 @@ def shell_background(still):
         pass
 
 
+def shell_picks_up_background():
+    """GNOME Shell reads SHELL_BACKGROUND_IMAGE only when it starts, so right after installing,
+    the running one doesn't have it until the next login. Hand it to the session and restart the
+    Shell the way GNOME does on X11: systemd starts it again at once, and every window stays. Only
+    on X11 and a Shell systemd restarts; on Wayland a restart would end the session."""
+    if os.environ.get("XDG_SESSION_TYPE") != "x11" or not shutil.which("systemctl"):
+        return
+    unit = "org.gnome.Shell@x11.service"
+    shown = subprocess.run(["systemctl", "--user", "show", "-p", "Restart", "-p", "ActiveState", "-p", "MainPID",
+                            unit], capture_output=True, text=True, check=False).stdout
+    props = dict(line.split("=", 1) for line in shown.splitlines() if "=" in line)
+    if props.get("Restart") != "always" or props.get("ActiveState") != "active":
+        return
+    try:
+        with open(f"/proc/{props.get('MainPID')}/environ", "rb") as f:
+            if b"SHELL_BACKGROUND_IMAGE=" in f.read():
+                return
+    except OSError:
+        return
+    subprocess.run(["systemctl", "--user", "set-environment", f"SHELL_BACKGROUND_IMAGE={SHELL_BACKGROUND}"],
+                   check=False)
+    subprocess.run(["systemctl", "--user", "kill", "--signal=SIGTERM", unit], check=False)
+
+
 def _read_text(path):
     try:
         with open(path) as f:
