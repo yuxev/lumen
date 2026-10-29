@@ -115,6 +115,7 @@ nimbus logtime          today's and this month's logtime as 1337 counts it, in t
 nimbus logtime on|off    show or hide the desktop card
 nimbus logtime login LOGIN   follow another login than the one you're signed in with
 nimbus awake [MINUTES|on|off]   keep your session active so it doesn't lock (default 60 minutes)
+nimbus guard [off]               lock the screen on the first key or mouse move (3 s to let go first)
 nimbus stop             stop everything (stays off after logging in again); nothing is uninstalled
 nimbus start            start it again (opening the app does too)
 nimbus restore          undo everything

@@ -44,6 +44,9 @@ LOCK = os.path.join(CONFIG_DIR, ".lock")
 HELPER_LOCK = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "nimbus.lock")
 # lives in the session's runtime folder, which is emptied at logout: "keep awake" never outlives a session
 AWAKE = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "nimbus-awake.json")
+# "lock when touched": there while armed; also in the runtime folder, so it never outlives a session
+GUARD = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "nimbus-guard.json")
+GUARD_GRACE = 3          # seconds to take your hands off before it's armed
 FOREVER = -1
 
 # wallpapers that come with the app, shown until you pick a folder of your own
@@ -161,6 +164,17 @@ def keep_awake(minutes):
     _write(AWAKE, json.dumps({"until": until, "minutes": minutes}) + "\n")
     if minutes is not None:
         start()          # the helper holds the inhibitor
+
+
+def guard(on):
+    """Lock the screen the moment anyone touches the keyboard or mouse, after GUARD_GRACE seconds to
+    let go. The helper watches for it, locks with 42's own lock screen, and disarms itself."""
+    if on:
+        _write(GUARD, json.dumps({"armed": time.time()}) + "\n")
+        start()          # the helper does the watching
+    else:
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(GUARD)
 
 
 def start():

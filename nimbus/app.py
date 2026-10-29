@@ -208,10 +208,21 @@ class Window(Adw.ApplicationWindow):
                                       model=Gtk.StringList.new([label for _m, label in AWAKE_CHOICES]))
         self.awake_row.connect("notify::selected", self.on_awake)
         screen.add(self.awake_row)
+        guard = Adw.ActionRow(title="Lock when touched",
+                              subtitle=f"Walking away? Arm it, take your hands off, and {core.GUARD_GRACE} s later "
+                                       "the first key or mouse move locks the screen")
+        arm = Gtk.Button(label="Arm", valign=Gtk.Align.CENTER)
+        arm.connect("clicked", self.on_guard)
+        guard.add_suffix(arm)
+        screen.add(guard)
         box.append(screen)
         self.show_awake()
         GLib.timeout_add_seconds(30, self.show_awake)     # count down, and notice when it runs out
         return box
+
+    def on_guard(self, _button):
+        core.guard(True)
+        self.toasts.add_toast(Adw.Toast(title=f"Hands off: armed in {core.GUARD_GRACE} s", timeout=core.GUARD_GRACE))
 
     def on_awake(self, row, _param):
         if self.showing_awake:

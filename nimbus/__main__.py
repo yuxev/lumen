@@ -7,6 +7,8 @@
     nimbus awake [MINUTES|on|off]
                                      keep the screen from locking while you read or watch
                                      (default 60 minutes; "on" lasts until you turn it off or log out)
+    nimbus guard [off]               lock the screen on the first key or mouse move, from 3 s after
+                                     you run it (walking away from the computer)
     nimbus logtime [on|off|login LOGIN]
                                      your logtime as 1337 counts it, also shown live on the desktop:
                                      this session and the scholarship month (no setup needed)
@@ -92,6 +94,13 @@ def main(argv):
             else:
                 print("usage: nimbus awake [MINUTES|on|off]", file=sys.stderr)
                 return 1
+        elif command == "guard":
+            if len(argv) > 2 and argv[2] == "off":
+                core.guard(False)
+                print("Disarmed.")
+            else:
+                core.guard(True)
+                print(f"Hands off the keyboard and mouse: in {core.GUARD_GRACE} s the first touch locks the screen.")
         elif command == "logtime":
             return logtime_command(argv[2:])
         elif command == "stop":
