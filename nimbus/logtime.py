@@ -36,7 +36,7 @@ PLACE = os.path.join(core.CONFIG_DIR, "logtime-place.json")    # where the card 
 RETRY = 60               # seconds before asking 1337 again when it couldn't be reached
 FULL_DAY = 10 * 3600     # a day with this much time or more gets the strongest shade
 GOAL = 120               # hours to log in a period to keep the scholarship
-USER_AGENT = "wallpaper-studio (+https://github.com/yuxev/wallpaper-studio)"
+USER_AGENT = "nimbus (+https://github.com/yuxev/nimbus)"
 
 
 class ApiError(Exception):
@@ -150,7 +150,7 @@ class Card(Gtk.Window):
     never takes the focus, and stays out of the window switcher."""
 
     def __init__(self, api, on_shown):
-        super().__init__(type=Gtk.WindowType.TOPLEVEL, title="wallpaper-studio logtime")
+        super().__init__(type=Gtk.WindowType.TOPLEVEL, title="nimbus logtime")
         self.api = api                 # a Campus: 1337's logtime
         self.on_shown = on_shown
         self.total, self.days = None, {}          # 1337's hours: the period's, and each day's

@@ -1,4 +1,4 @@
-"""The Wallpaper Studio window: pick a wallpaper, see its colours, choose light or dark."""
+"""The Nimbus window: pick a wallpaper, see its colours, choose light or dark."""
 import concurrent.futures
 import os
 import threading
@@ -12,7 +12,7 @@ from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
 
 from . import core  # noqa: E402
 
-APP_ID = "io.github.WallpaperStudio"
+APP_ID = "io.github.yuxev.Nimbus"
 THUMB_W, THUMB_H = 480, 270          # pixels on disk; shown at half size, sharp on HiDPI screens
 ROTATIONS = [(0, "Never"), (1, "Every hour"), (3, "Every 3 hours"), (5, "Every 5 hours"),
              (12, "Every 12 hours"), (24, "Once a day")]
@@ -76,7 +76,7 @@ def swatch(colour):
 
 class Window(Adw.ApplicationWindow):
     def __init__(self, app):
-        super().__init__(application=app, title="Wallpaper Studio", default_width=900, default_height=780)
+        super().__init__(application=app, title="Nimbus", default_width=900, default_height=780)
         self.pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
         self.thumbs = {}            # path -> button in the grid
         self.busy = False
@@ -120,7 +120,7 @@ class Window(Adw.ApplicationWindow):
 
         menu = Gio.Menu()
         menu.append("Restore original look", "win.restore")
-        menu.append("About Wallpaper Studio", "win.about")
+        menu.append("About Nimbus", "win.about")
         header.pack_end(Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, tooltip_text="Menu"))
         for name, handler in (("restore", self.ask_restore), ("about", self.about)):
             action = Gio.SimpleAction.new(name, None)
@@ -190,7 +190,7 @@ class Window(Adw.ApplicationWindow):
         mode_row.add_suffix(modes)
         look.add(mode_row)
         look.add(self.switch_row("See-through windows", "Let the wallpaper show behind app windows", "glass"))
-        look.add(self.switch_row("Recolour the Terminal", "Adds a “Wallpaper Studio” profile to GNOME Terminal",
+        look.add(self.switch_row("Recolour the Terminal", "Adds a “Nimbus” profile to GNOME Terminal",
                                  "terminal"))
         box.append(look)
 
@@ -417,7 +417,7 @@ class Window(Adw.ApplicationWindow):
         dialog.present()
 
     def about(self, *_):
-        Gtk.AboutDialog(transient_for=self, modal=True, program_name="Wallpaper Studio", logo_icon_name=APP_ID,
+        Gtk.AboutDialog(transient_for=self, modal=True, program_name="Nimbus", logo_icon_name=APP_ID,
                         comments="Change your wallpaper and recolour your desktop to match it.",
                         version="1.0", license_type=Gtk.License.MIT_X11).present()
 
@@ -441,10 +441,10 @@ class App(Adw.Application):
         self.css_monitor = Gio.File.new_for_path(core.THEME_CSS).monitor_file(Gio.FileMonitorFlags.NONE, None)
         self.css_monitor.connect("changed", lambda *_: GLib.timeout_add(150, self.reload_user_css))
         self.reload_user_css()
-        quit_action = Gio.SimpleAction.new("quit", None)     # used by `wallpaper-studio stop`
+        quit_action = Gio.SimpleAction.new("quit", None)     # used by `nimbus stop`
         quit_action.connect("activate", lambda *_: self.quit())
         self.add_action(quit_action)
-        core.start()     # opening the app undoes `wallpaper-studio stop`
+        core.start()     # opening the app undoes `nimbus stop`
 
     def reload_user_css(self):
         gtk_css = os.path.join(core.HOME, ".config", "gtk-4.0", "gtk.css")
@@ -459,5 +459,5 @@ class App(Adw.Application):
 def main():
     # so GNOME matches the window to its launcher (name and icon in the top bar), not "python3"
     GLib.set_prgname(APP_ID)
-    GLib.set_application_name("Wallpaper Studio")
+    GLib.set_application_name("Nimbus")
     return App().run(None)

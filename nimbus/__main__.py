@@ -1,20 +1,20 @@
-"""wallpaper-studio — change your wallpaper and recolour your desktop from it.
+"""nimbus — change your wallpaper and recolour your desktop from it.
 
-    wallpaper-studio                 open the window
-    wallpaper-studio set FILE        use a picture or video as the wallpaper
-    wallpaper-studio next            a random different wallpaper from your folder
-    wallpaper-studio light|dark|auto light or dark colours, or follow the clock
-    wallpaper-studio awake [MINUTES|on|off]
+    nimbus                 open the window
+    nimbus set FILE        use a picture or video as the wallpaper
+    nimbus next            a random different wallpaper from your folder
+    nimbus light|dark|auto light or dark colours, or follow the clock
+    nimbus awake [MINUTES|on|off]
                                      keep the screen from locking while you read or watch
                                      (default 60 minutes; "on" lasts until you turn it off or log out)
-    wallpaper-studio logtime [on|off|login LOGIN]
+    nimbus logtime [on|off|login LOGIN]
                                      your logtime as 1337 counts it, also shown live on the desktop:
                                      this session and the scholarship month (no setup needed)
-    wallpaper-studio stop            stop everything (the wallpaper, rotation, keep-awake, the window)
+    nimbus stop            stop everything (the wallpaper, rotation, keep-awake, the window)
                                      until you start it again; nothing is uninstalled
-    wallpaper-studio start           start it again
-    wallpaper-studio restore         put your desktop back the way it was
-    wallpaper-studio desktop         the background helper (started at login)
+    nimbus start           start it again
+    nimbus restore         put your desktop back the way it was
+    nimbus desktop         the background helper (started at login)
 """
 import os
 import sys
@@ -40,11 +40,11 @@ def logtime_command(args):
         try:
             total, days = logtime.source().month(today)
         except logtime.ApiError as e:
-            print(f"wallpaper-studio: {e}", file=sys.stderr)
+            print(f"nimbus: {e}", file=sys.stderr)
             return 1
         print(logtime.summary(total, days, today))
     else:
-        print("usage: wallpaper-studio logtime [on|off|login LOGIN]", file=sys.stderr)
+        print("usage: nimbus logtime [on|off|login LOGIN]", file=sys.stderr)
         return 1
     return 0
 
@@ -70,7 +70,7 @@ def main(argv):
             core.start()
         elif command == "next":
             if core.next_wallpaper() is None:
-                print("wallpaper-studio: no other pictures in", core.load_config()["folder"], file=sys.stderr)
+                print("nimbus: no other pictures in", core.load_config()["folder"], file=sys.stderr)
                 return 1
             core.start()
         elif command in ("light", "dark", "auto"):
@@ -85,29 +85,29 @@ def main(argv):
                 print("Screen locks normally again.")
             elif arg == "on":
                 core.keep_awake(core.FOREVER)
-                print("Screen stays awake until you run 'wallpaper-studio awake off' or log out.")
+                print("Screen stays awake until you run 'nimbus awake off' or log out.")
             elif arg.isdigit() and int(arg) > 0:
                 core.keep_awake(int(arg))
                 print(f"Screen stays awake for {arg} minutes.")
             else:
-                print("usage: wallpaper-studio awake [MINUTES|on|off]", file=sys.stderr)
+                print("usage: nimbus awake [MINUTES|on|off]", file=sys.stderr)
                 return 1
         elif command == "logtime":
             return logtime_command(argv[2:])
         elif command == "stop":
             core.stop()
-            print("Wallpaper Studio stopped. Your colours stay as they are; nothing was uninstalled.\n"
-                  "It stays off after logging in again. Run 'wallpaper-studio start' (or open the app) to bring it back.")
+            print("Nimbus stopped. Your colours stay as they are; nothing was uninstalled.\n"
+                  "It stays off after logging in again. Run 'nimbus start' (or open the app) to bring it back.")
         elif command == "start":
             core.start()
-            print("Wallpaper Studio started.")
+            print("Nimbus started.")
         elif command == "restore":
             core.restore()
         else:
             print(__doc__.strip())
             return 1
     except ValueError as e:
-        print(f"wallpaper-studio: {e}", file=sys.stderr)
+        print(f"nimbus: {e}", file=sys.stderr)
         return 1
     return 0
 

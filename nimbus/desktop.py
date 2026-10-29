@@ -30,7 +30,7 @@ from gi.repository import Gdk, GdkPixbuf, Gio, GLib  # noqa: E402
 
 from . import core  # noqa: E402
 
-VLC_SOCKET = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "wallpaper-studio-vlc.sock")
+VLC_SOCKET = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "nimbus-vlc.sock")
 
 # --- just enough Xlib ---------------------------------------------------------------
 
@@ -154,7 +154,7 @@ class Desktop:
     def __init__(self):
         self.dpy = XOpenDisplay(None)
         if not self.dpy:
-            raise SystemExit("wallpaper-studio: no X display (Wayland sessions aren't supported)")
+            raise SystemExit("nimbus: no X display (Wayland sessions aren't supported)")
         self.screen = XDefaultScreen(self.dpy)
         self.root = XRootWindow(self.dpy, self.screen)
         self.depth = XDefaultDepth(self.dpy, self.screen)
@@ -306,7 +306,7 @@ class Desktop:
             # flag 8 = "idle": the session isn't marked idle, so the screen doesn't blank or lock by itself.
             # GNOME drops it on its own if this process ever goes away.
             reply = self.session_manager().call_sync(
-                "Inhibit", GLib.Variant("(susu)", ("io.github.WallpaperStudio", 0, "Keeping the screen awake", 8)),
+                "Inhibit", GLib.Variant("(susu)", ("io.github.yuxev.Nimbus", 0, "Keeping the screen awake", 8)),
                 Gio.DBusCallFlags.NONE, -1, None)
             self.inhibit_cookie = reply.unpack()[0]
         except GLib.Error:
@@ -347,7 +347,7 @@ class Desktop:
 
     def run(self, command):
         # in a child process: a video's still frame can take a few seconds to read
-        self.busy = subprocess.Popen([sys.executable, "-m", "wallpaper_studio", command],
+        self.busy = subprocess.Popen([sys.executable, "-m", "nimbus", command],
                                      cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -364,7 +364,7 @@ class Desktop:
     def ensure_window(self, width, height):
         if self.win is None:
             self.win = XCreateSimpleWindow(self.dpy, self.root, 0, 0, width, height, 0, 0, 0)
-            XStoreName(self.dpy, self.win, b"wallpaper-studio")
+            XStoreName(self.dpy, self.win, b"nimbus")
             self.set_atoms("_NET_WM_WINDOW_TYPE", ["_NET_WM_WINDOW_TYPE_DESKTOP"])
             self.set_atoms("_NET_WM_STATE", ["_NET_WM_STATE_STICKY", "_NET_WM_STATE_BELOW",
                                              "_NET_WM_STATE_SKIP_TASKBAR", "_NET_WM_STATE_SKIP_PAGER"])
@@ -641,10 +641,10 @@ def main():
     else:
         return 0          # another helper is running
     if os.path.exists(core.STOPPED):
-        return 0          # `wallpaper-studio stop`: stay off, even at login, until `start`
+        return 0          # `nimbus stop`: stay off, even at login, until `start`
     lock.seek(0)
     lock.truncate()
-    lock.write(f"{os.getpid()}\n")    # so `wallpaper-studio stop` knows whom to stop
+    lock.write(f"{os.getpid()}\n")    # so `nimbus stop` knows whom to stop
     lock.flush()
     desktop = Desktop()
     signal.signal(signal.SIGTERM, lambda *_: (desktop.stop_video(), desktop.release_icons(),

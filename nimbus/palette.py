@@ -222,7 +222,7 @@ tooltip.background, messagedialog, dialog.background, window.dialog {
 # Some GTK 3 apps paint a solid window of their own over the theme's, and GTK ranks an app's own
 # styles above the theme's: only ~/.config/gtk-3.0/gtk.css ranks above them, so this goes there.
 # It names no colours of its own, only the theme's, so recolouring still reaches open apps live.
-APP_GLASS = """/* Wallpaper Studio — glass for apps that paint their own window; changes are overwritten */
+APP_GLASS = """/* Nimbus — glass for apps that paint their own window; changes are overwritten */
 .nautilus-window, .nautilus-window notebook, .nautilus-window notebook > stack {
   background: alpha(@window_bg_color, 0.12);
 }
@@ -257,11 +257,11 @@ def gtk_css(p, dark, glass):
         "theme_base_color": p["sheet"], "theme_text_color": p["ink"],
         "theme_selected_bg_color": a, "theme_selected_fg_color": p["on_accent"],
         # the raw palette under stable names, for your own styles in gtk.css (see README)
-        "ws_paper": p["paper"], "ws_paper2": p["paper2"], "ws_sheet": p["sheet"], "ws_ink": p["ink"],
-        "ws_muted": p["muted"], "ws_accent": a, "ws_accent_text": p["accent_text"],
-        "ws_on_accent": p["on_accent"], "ws_shadow": "#000000" if dark else p["ink"],
+        "nimbus_paper": p["paper"], "nimbus_paper2": p["paper2"], "nimbus_sheet": p["sheet"], "nimbus_ink": p["ink"],
+        "nimbus_muted": p["muted"], "nimbus_accent": a, "nimbus_accent_text": p["accent_text"],
+        "nimbus_on_accent": p["on_accent"], "nimbus_shadow": "#000000" if dark else p["ink"],
     }
-    css = "/* Wallpaper Studio — generated from your wallpaper; changes are overwritten */\n"
+    css = "/* Nimbus — generated from your wallpaper; changes are overwritten */\n"
     css += "".join(f"@define-color {k} {v};\n" for k, v in colours.items())
     # the desktop-icons window lies over the wallpaper and must stay clear
     css += "\nwindow.desktopwindow { background-color: transparent; }\n"

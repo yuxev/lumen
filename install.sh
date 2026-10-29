@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Install Wallpaper Studio for the current user (no sudo needed). Run it again to update.
+# Install Nimbus for the current user (no sudo needed). Run it again to update.
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
-APP=io.github.WallpaperStudio
-DEST="$HOME/.local/share/wallpaper-studio"
+APP=io.github.yuxev.Nimbus
+DEST="$HOME/.local/share/nimbus"
 ADW_GTK3=v6.5   # GTK 3 theme that lets older apps (Files, Terminal…) take the new colours
 
 say() { printf '\033[1m%s\033[0m\n' "$*"; }
@@ -32,7 +32,7 @@ for candidate in /usr/bin/python3 "$(command -v python3 || true)" /usr/local/bin
 	if has_gtk "$candidate"; then PYTHON=$candidate; break; fi
 done
 if [ -z "$PYTHON" ]; then
-	echo "Wallpaper Studio needs a Python with GTK 4 and libadwaita, and none was found." >&2
+	echo "Nimbus needs a Python with GTK 4 and libadwaita, and none was found." >&2
 	echo "Tried: ${tried[*]:-no python3 at all}" >&2
 	echo "On Ubuntu these come from the packages python3-gi, python3-gi-cairo, gir1.2-gtk-4.0 and gir1.2-adw-1." >&2
 	exit 1
@@ -48,28 +48,62 @@ if [ -f "$HOME/.config/autostart/studio-wallpaper.desktop" ]; then
 	exit 1
 fi
 
+# --- moving over from Wallpaper Studio (this app's old name) -----------------------
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}"
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}"
+OLD_DEST="$HOME/.local/share/wallpaper-studio"
+MIGRATED=
+if [ -d "$OLD_DEST" ] || [ -d "$CONFIG/wallpaper-studio" ]; then
+	say "Moving your Wallpaper Studio settings over to Nimbus"
+	OLD_HELPER="^[^ ]+ $OLD_DEST/wallpaper-studio desktop\$|^[^ ]*python3[^ ]* -m wallpaper_studio desktop\$"
+	pkill -f "$OLD_HELPER" 2>/dev/null || true
+	for _ in $(seq 50); do pgrep -f "$OLD_HELPER" >/dev/null || break; sleep 0.1; done
+	[ -d "$CONFIG/wallpaper-studio" ] && [ ! -e "$CONFIG/nimbus" ] && mv "$CONFIG/wallpaper-studio" "$CONFIG/nimbus"
+	[ -d "$CACHE/wallpaper-studio" ] && [ ! -e "$CACHE/nimbus" ] && mv "$CACHE/wallpaper-studio" "$CACHE/nimbus"
+	# saved paths still point into the old folders
+	for f in "$CONFIG/nimbus/config.json" "$CONFIG/nimbus/state.json"; do
+		[ -f "$f" ] && sed -i -e "s|$OLD_DEST/wallpapers|$DEST/wallpapers|g" -e "s|$CACHE/wallpaper-studio/|$CACHE/nimbus/|g" "$f"
+	done
+	# the old import line in gtk.css; Nimbus adds its own when it recolours
+	for f in "$CONFIG/gtk-3.0/gtk.css" "$CONFIG/gtk-4.0/gtk.css"; do
+		[ -f "$f" ] && sed -i '/\/\* wallpaper-studio \*\//d' "$f"
+	done
+	rm -rf "$OLD_DEST" "$HOME/.local/bin/wallpaper-studio" "$CONFIG/autostart/wallpaper-studio-desktop.desktop" \
+		"$HOME/.local/share/applications/io.github.WallpaperStudio.desktop" \
+		"$HOME/.local/share/icons/hicolor/scalable/apps/io.github.WallpaperStudio.svg" \
+		"$CONFIG/fish/conf.d/wallpaper-studio.fish"
+	for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+		[ -f "$rc" ] && sed -i '/^# >>> wallpaper-studio >>>$/,/^# <<< wallpaper-studio <<<$/d' "$rc"
+	done
+	MIGRATED=1
+fi
+# your own styles in gtk.css used the old colour names (@ws_ink…); they're @nimbus_ink… now
+for f in "$CONFIG/gtk-3.0/gtk.css" "$CONFIG/gtk-4.0/gtk.css"; do
+	[ -f "$f" ] && grep -q '@ws_' "$f" && sed -i 's/@ws_/@nimbus_/g' "$f"
+done
+
 # --- the app ------------------------------------------------------------------------
 say "Installing to $DEST"
 # stop this install's background helper (and one started by an older version) before replacing it
-HELPER="^[^ ]+ $DEST/wallpaper-studio desktop\$|^[^ ]*python3[^ ]* -m wallpaper_studio desktop\$"
+HELPER="^[^ ]+ $DEST/bin/nimbus desktop\$|^[^ ]*python3[^ ]* -m nimbus desktop\$"
 pkill -f "$HELPER" 2>/dev/null || true
 for _ in $(seq 50); do pgrep -f "$HELPER" >/dev/null || break; sleep 0.1; done   # let it let go first
 rm -rf "$DEST"
 mkdir -p "$DEST" "$HOME/.local/bin" "$HOME/.local/share/applications" \
 	"$HOME/.local/share/icons/hicolor/scalable/apps" "$HOME/.config/autostart"
-cp -r wallpaper_studio wallpaper-studio wallpapers "$DEST/"
+cp -r nimbus bin wallpapers "$DEST/"
 find "$DEST" -name __pycache__ -prune -exec rm -rf {} +
 # always run with the Python that has GTK, whatever python3 comes first in PATH later
-sed -i "1s|^#!.*|#!$PYTHON|" "$DEST/wallpaper-studio"
-ln -sf "$DEST/wallpaper-studio" "$HOME/.local/bin/wallpaper-studio"
+sed -i "1s|^#!.*|#!$PYTHON|" "$DEST/bin/nimbus"
+ln -sf "$DEST/bin/nimbus" "$HOME/.local/bin/nimbus"
 cp data/$APP.svg "$HOME/.local/share/icons/hicolor/scalable/apps/$APP.svg"
 
 cat >"$HOME/.local/share/applications/$APP.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
-Name=Wallpaper Studio
+Name=Nimbus
 Comment=Change your wallpaper and recolour your desktop to match
-Exec=$DEST/wallpaper-studio
+Exec=$DEST/bin/nimbus
 Icon=$APP
 Categories=Settings;DesktopSettings;GTK;
 Keywords=wallpaper;background;theme;colour;color;
@@ -77,31 +111,31 @@ StartupNotify=true
 DESKTOP
 
 # the helper that draws the wallpaper, every time you log in
-cat >"$HOME/.config/autostart/wallpaper-studio-desktop.desktop" <<DESKTOP
+cat >"$HOME/.config/autostart/nimbus-desktop.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
-Name=Wallpaper Studio (desktop)
-Comment=Draws your Wallpaper Studio wallpaper behind every window
-Exec=$DEST/wallpaper-studio desktop
+Name=Nimbus (desktop)
+Comment=Draws your Nimbus wallpaper behind every window
+Exec=$DEST/bin/nimbus desktop
 NoDisplay=true
 X-GNOME-Autostart-enabled=true
 DESKTOP
 
-# the wallpaper-studio command in every new terminal, even where ~/.local/bin isn't on PATH
+# the nimbus command in every new terminal, even where ~/.local/bin isn't on PATH
 # (zsh never adds it, and bash only does at login if the folder already existed)
-MARK_BEGIN="# >>> wallpaper-studio >>>"
-MARK_END="# <<< wallpaper-studio <<<"
+MARK_BEGIN="# >>> nimbus >>>"
+MARK_END="# <<< nimbus <<<"
 add_alias() {
 	local rc=$1
 	[ -f "$rc" ] && sed -i "/^$MARK_BEGIN\$/,/^$MARK_END\$/d" "$rc"
 	[ -s "$rc" ] && [ -n "$(tail -c1 "$rc")" ] && echo >>"$rc"   # don't glue onto a last line without a newline
-	printf '%s\nalias wallpaper-studio="%s"\n%s\n' "$MARK_BEGIN" "$DEST/wallpaper-studio" "$MARK_END" >>"$rc"
+	printf '%s\nalias nimbus="%s"\n%s\n' "$MARK_BEGIN" "$DEST/bin/nimbus" "$MARK_END" >>"$rc"
 }
 add_alias "$HOME/.bashrc"
 if [ -f "$HOME/.zshrc" ] || command -v zsh >/dev/null; then add_alias "$HOME/.zshrc"; fi
 if command -v fish >/dev/null; then
 	mkdir -p "$HOME/.config/fish/conf.d"
-	printf 'alias wallpaper-studio "%s"\n' "$DEST/wallpaper-studio" >"$HOME/.config/fish/conf.d/wallpaper-studio.fish"
+	printf 'alias nimbus "%s"\n' "$DEST/bin/nimbus" >"$HOME/.config/fish/conf.d/nimbus.fish"
 fi
 
 # --- GTK 3 theme --------------------------------------------------------------------
@@ -119,8 +153,14 @@ fi
 update-desktop-database -q "$HOME/.local/share/applications" 2>/dev/null || true
 gtk-update-icon-cache -q -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
 
-# start the helper now, so you don't have to log out
-(setsid "$DEST/wallpaper-studio" desktop >/dev/null 2>&1 &)
+if [ -n "$MIGRATED" ]; then
+	# recolour under the new theme names, then the old themes can go
+	"$DEST/bin/nimbus" apply 2>/dev/null || true
+	rm -rf "$HOME/.local/share/themes/Wallpaper Studio A" "$HOME/.local/share/themes/Wallpaper Studio B"
+fi
 
-say "Done (using $PYTHON). Open “Wallpaper Studio” from your apps, or run: wallpaper-studio"
-echo "The wallpaper-studio command works in new terminals (in this one, run: source ~/.bashrc, or ~/.zshrc)."
+# start the helper now, so you don't have to log out
+(setsid "$DEST/bin/nimbus" desktop >/dev/null 2>&1 &)
+
+say "Done (using $PYTHON). Open “Nimbus” from your apps, or run: nimbus"
+echo "The nimbus command works in new terminals (in this one, run: source ~/.bashrc, or ~/.zshrc)."

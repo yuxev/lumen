@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Remove Wallpaper Studio and put your desktop back the way it was.
+# Remove Nimbus and put your desktop back the way it was.
 set -uo pipefail
-APP=io.github.WallpaperStudio
-DEST="$HOME/.local/share/wallpaper-studio"
+APP=io.github.yuxev.Nimbus
+DEST="$HOME/.local/share/nimbus"
 
-[ -x "$DEST/wallpaper-studio" ] && "$DEST/wallpaper-studio" restore
-pkill -f "^[^ ]+ $DEST/wallpaper-studio desktop\$|^[^ ]*python3[^ ]* -m wallpaper_studio desktop\$" 2>/dev/null
-rm -rf "$DEST" "$HOME/.config/wallpaper-studio" "$HOME/.cache/wallpaper-studio"
+[ -x "$DEST/bin/nimbus" ] && "$DEST/bin/nimbus" restore
+pkill -f "^[^ ]+ $DEST/bin/nimbus desktop\$|^[^ ]*python3[^ ]* -m nimbus desktop\$" 2>/dev/null
+rm -rf "$DEST" "$HOME/.config/nimbus" "$HOME/.cache/nimbus"
 for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
-	[ -f "$rc" ] && sed -i '/^# >>> wallpaper-studio >>>$/,/^# <<< wallpaper-studio <<<$/d' "$rc"
+	[ -f "$rc" ] && sed -i '/^# >>> nimbus >>>$/,/^# <<< nimbus <<<$/d' "$rc"
 done
-rm -f "$HOME/.config/fish/conf.d/wallpaper-studio.fish"
-rm -f "$HOME/.local/bin/wallpaper-studio" "$HOME/.local/share/applications/$APP.desktop" \
-	"$HOME/.local/share/icons/hicolor/scalable/apps/$APP.svg" "$HOME/.config/autostart/wallpaper-studio-desktop.desktop"
-echo "Wallpaper Studio removed. (The adw-gtk3 theme in ~/.local/share/themes was left in place.)"
+rm -f "$HOME/.config/fish/conf.d/nimbus.fish"
+rm -f "$HOME/.local/bin/nimbus" "$HOME/.local/share/applications/$APP.desktop" \
+	"$HOME/.local/share/icons/hicolor/scalable/apps/$APP.svg" "$HOME/.config/autostart/nimbus-desktop.desktop"
+echo "Nimbus removed. (The adw-gtk3 theme in ~/.local/share/themes was left in place.)"
