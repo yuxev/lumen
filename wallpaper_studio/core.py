@@ -60,8 +60,9 @@ DEFAULT_CONFIG = {
     "terminal": True,               # recolour GNOME Terminal
     "logtime": True,                # your 42 logtime on the desktop (logtime.py)
     # apps that draw their own windows, so the glass theme can't reach them: with glass on, the
-    # whole window is made see-through instead (its text too), by WM_CLASS
-    "glass_apps": {"brave-browser": 0.88, "discord": 0.88},
+    # whole window is made see-through instead (its text too), by WM_CLASS, e.g.
+    # {"brave-browser": 0.88}; none by default, since it fades what's in them as well
+    "glass_apps": {},
 }
 
 # settings we touch, saved once before the first change so Restore can put them back
