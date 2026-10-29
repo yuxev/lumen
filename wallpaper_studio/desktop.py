@@ -113,7 +113,7 @@ PROPERTY_NOTIFY = 28
 PROPERTY_CHANGE_MASK = 1 << 22
 SUBSTRUCTURE_MASKS = (1 << 19) | (1 << 20)   # SubstructureNotify | SubstructureRedirect
 ZPIXMAP = 2
-XA_ATOM, XA_CARDINAL, XA_WINDOW = 4, 6, 33
+XA_ATOM, XA_CARDINAL, XA_STRING, XA_WINDOW = 4, 6, 31, 33
 PROP_REPLACE = 0
 
 
@@ -192,6 +192,7 @@ class Desktop:
         self.icons = set()           # desktop-icon windows kept above ours
         self.links = {}              # window -> the window it's kept above (WM_TRANSIENT_FOR set)
         self.card = None             # the logtime card, while it's on (logtime.py)
+        self.faded = {}              # window -> its opacity, for apps the glass theme can't reach
         self.logtime_pending = 0
         self.restacks = []           # recent restack times, to back off if something fights back
         self.restack_pending = 0
@@ -216,6 +217,7 @@ class Desktop:
 
     def on_restacked(self):
         self.restack_pending = 0
+        self.fade_apps()
         now = time.monotonic()
         self.restacks = [t for t in self.restacks if now - t < 2]
         if len(self.restacks) < 10:      # more than that in 2 s means a fight: leave it to the 2 s check
@@ -225,6 +227,7 @@ class Desktop:
 
     def on_change(self, _monitor, file, _other, _event):
         if file.get_basename() == "config.json":
+            self.fade_apps(again=True)
             if self.logtime_pending:
                 GLib.source_remove(self.logtime_pending)
             self.logtime_pending = GLib.timeout_add(300, self.sync_logtime)
@@ -380,6 +383,8 @@ class Desktop:
         if (target, still, width, height) == self.shown:
             return False
         self.shown = (target, still, width, height)
+        if still and os.path.exists(still):
+            core.shell_background(still)        # the overview's wallpaper too (from the next login)
 
         if target is None:
             self.stop_video()
@@ -435,16 +440,15 @@ class Desktop:
         return True
 
     def keep_icons_above(self, stack):
-        """Chain the desktop windows bottom to top: the wallpaper, the icons, the logtime card (on
-        top so it can be dragged; it takes clicks on the card only).
+        """Chain the desktop windows: the icons above the wallpaper. (The logtime card is an ordinary
+        window kept below the others, so it's above both anyway.)
 
         Each is marked as transient for the one under it, and the window manager keeps a transient
         above its parent at all times. So when the icons extension lowers its window it lands just
         above ours, never under the wallpaper: restacking afterwards would leave a visible flicker."""
-        card = self.card.xid() if self.card is not None else None
         desktop = self.atom("_NET_WM_WINDOW_TYPE_DESKTOP")
         for w in stack:
-            if w in (self.win, card) or w in self.checked:
+            if w == self.win or w in self.checked:
                 continue
             self.checked.add(w)
             if desktop in self.window_atoms(w, "_NET_WM_WINDOW_TYPE"):
@@ -452,10 +456,6 @@ class Desktop:
         self.checked &= set(stack)
         self.icons &= self.checked
         wanted = {w: self.win for w in self.icons} if self.win else {}
-        if card in stack:
-            under = [w for w in stack if w in self.icons] or [self.win]
-            if under[-1]:
-                wanted[card] = under[-1]
         for child, parent in wanted.items():
             if self.links.get(child) != parent:
                 value = (ctypes.c_long * 1)(parent)
@@ -463,6 +463,44 @@ class Desktop:
                                 ctypes.cast(value, P), 1)
         self.links = wanted
         XFlush(self.dpy)
+
+    def fade_apps(self, again=False):
+        """With glass on, make the apps the theme can't reach (browsers, Electron apps) see-through
+        as whole windows, through the window manager; new windows as they open."""
+        config = core.load_config()
+        wanted = (config.get("glass_apps") or {}) if config["glass"] else {}
+        clients = set(self.window_atoms(self.root, "_NET_CLIENT_LIST"))
+        if again:                           # the settings changed: look at every window afresh
+            self.unfade(self.faded)
+            self.faded = {}
+        for w in clients - set(self.faded):
+            opacity = wanted.get(self.window_class(w)) if wanted else None
+            self.faded[w] = opacity
+            if opacity:
+                value = (ctypes.c_long * 1)(int(min(max(opacity, 0.1), 1) * 0xFFFFFFFF))
+                XChangeProperty(self.dpy, w, self.atom("_NET_WM_WINDOW_OPACITY"), XA_CARDINAL, 32,
+                                PROP_REPLACE, ctypes.cast(value, P), 1)
+        self.faded = {w: o for w, o in self.faded.items() if w in clients}
+        XFlush(self.dpy)
+
+    def unfade(self, windows):
+        for w, opacity in windows.items():
+            if opacity:
+                XDeleteProperty(self.dpy, w, self.atom("_NET_WM_WINDOW_OPACITY"))
+        XFlush(self.dpy)
+
+    def window_class(self, window):
+        """The first part of a window's WM_CLASS (e.g. "brave-browser"), or ""."""
+        actual, fmt = XID(), ctypes.c_int()
+        n, after = ctypes.c_ulong(), ctypes.c_ulong()
+        data = ctypes.POINTER(ctypes.c_ubyte)()
+        ok = XGetWindowProperty(self.dpy, window, self.atom("WM_CLASS"), 0, 64, 0, XA_STRING, ctypes.byref(actual),
+                                ctypes.byref(fmt), ctypes.byref(n), ctypes.byref(after), ctypes.byref(data))
+        if ok != 0 or not data:
+            return ""
+        raw = bytes(data[i] for i in range(n.value)) if fmt.value == 8 else b""
+        XFree(ctypes.cast(data, P))
+        return raw.split(b"\0")[0].decode(errors="replace")
 
     def release_icons(self):
         """Undo keep_icons_above, when the helper stops."""
@@ -605,6 +643,7 @@ def main():
     lock.write(f"{os.getpid()}\n")    # so `wallpaper-studio stop` knows whom to stop
     lock.flush()
     desktop = Desktop()
-    signal.signal(signal.SIGTERM, lambda *_: (desktop.stop_video(), desktop.release_icons(), os._exit(0)))
+    signal.signal(signal.SIGTERM, lambda *_: (desktop.stop_video(), desktop.release_icons(),
+                                              desktop.unfade(desktop.faded), os._exit(0)))
     GLib.MainLoop().run()
     return 0

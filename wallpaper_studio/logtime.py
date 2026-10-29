@@ -136,6 +136,7 @@ EDGE = 4                # the hard shadow under the right and bottom edges, like
 TITLE = 30              # the title strip
 WIDTH = 7 * CELL + 2 * PAD
 METER = 40, 3           # the goal as hour cells: 40 a row (in tens), 3 rows = 120h
+FROST = 20              # the glass blurs the wallpaper by drawing it this many times smaller, then stretched
 FALLBACK = {"paper": "#EEEEEE", "paper2": "#DDDDDD", "sheet": "#F7F7F7", "ink": "#1A1A1A",
             "muted": "#5A5A5A", "accent": "#14B8B0", "accent_text": "#0E8C86", "on_accent": "#FFFFFF"}
 
@@ -144,10 +145,9 @@ class Card(Gtk.Window):
     """This session, the scholarship month's calendar and how far you are from the goal, as 1337
     counts them, drawn on the desktop above the wallpaper.
 
-    The window manager won't move a desktop window, so the window covers the screen, see-through,
-    and the card is drawn where it was last dragged to. Only the card takes the pointer (drag it
-    anywhere; hover a day for its hours); everywhere else clicks go through to the desktop icons.
-    It never takes the focus."""
+    It's a window of its own, below all the others; drag it anywhere (the window manager moves it,
+    like a window by its title bar). Hover a day for its hours; double-click for the details. It
+    never takes the focus, and stays out of the window switcher."""
 
     def __init__(self, api, on_shown):
         super().__init__(type=Gtk.WindowType.TOPLEVEL, title="wallpaper-studio logtime")
@@ -159,9 +159,13 @@ class Card(Gtk.Window):
         self.host = socket.gethostname().split(".")[0]
         self.fetching = False
         self.colours, self.glass = None, False
+        self.backdrop, self.shown = None, None    # the wallpaper, tiny, for the frosted glass; from which file
+        self.marks = None                         # while drawing: the rows that hold text (top, bottom)
         self.height = 560                         # the card's, worked out again on every draw
         self.pos, self.size = (0, 0), (0, 0)      # the card's place on the screen, shadow included
-        self.drag = None                          # the pointer's offset in the card, while dragging
+        self.press = None                         # where a click began, until it turns into a drag
+        self.saving = 0
+        self.placed = False                       # back where it was left (the window manager places it first)
         self.hover, self.cells = None, []         # the day under the pointer; the drawn day cells
         saved = core._read_json(PLACE, None)
         self.expanded = bool(saved.get("expanded")) if isinstance(saved, dict) else False   # double-click
@@ -169,7 +173,9 @@ class Card(Gtk.Window):
         mono = Gio.Settings.new("org.gnome.desktop.interface").get_string("monospace-font-name")
         self.font = (mono or "Monospace 11").rsplit(" ", 1)[0]
 
-        self.set_type_hint(Gdk.WindowTypeHint.DESKTOP)
+        # an ordinary window kept below all others: the window manager moves those smoothly
+        # (desktop windows it barely moves), and it stays on top of the desktop and its icons
+        self.set_keep_below(True)
         self.set_decorated(False)
         self.set_skip_taskbar_hint(True)
         self.set_skip_pager_hint(True)
@@ -191,8 +197,8 @@ class Card(Gtk.Window):
         self.get_screen().connect("monitors-changed", lambda *_: self.place())
 
         self.recolour()
-        self.move(0, 0)
         self.place()
+        self.move(*self.pos)
         self.show()
         self.shape()
         self.fetch()
@@ -200,10 +206,23 @@ class Card(Gtk.Window):
 
     def mapped(self, *_):
         self.on_shown()
-        self.get_window().move(0, 0)      # the window manager doesn't always put it where it asked
+        GLib.timeout_add(200, self.restore)
+        return False
+
+    def restore(self):
+        """Back where it was left, once the window manager has placed the new window its own way."""
+        self.placed = True
+        self.put(*self.pos)
         return False
 
     def moved(self, *_):
+        """Moved, by a drag or the window manager: draw the glass for its new place, and remember it."""
+        where = tuple(self.get_window().get_origin()[1:])      # on the screen (the event's is in its frame)
+        if self.placed and where != self.pos:
+            self.pos = where
+            if self.saving:
+                GLib.source_remove(self.saving)
+            self.saving = GLib.timeout_add(500, self.save)
         self.shape()
         self.queue_draw()
         return False
@@ -218,12 +237,38 @@ class Card(Gtk.Window):
         self.destroy()
 
     def recolour(self):
-        """The wallpaper's colours, in the current light/dark mode, and see-through like the
-        app's windows when glass is on."""
+        """The wallpaper's colours, in the current light/dark mode, and frosted glass over the
+        wallpaper when glass is on."""
         state = core.load_state()
         self.colours = state.get("palette", {}).get(state.get("mode") or core.effective_mode())
         self.glass = core.load_config()["glass"]
+        picture = state.get("still") or state.get("wallpaper")      # a video's still frame
+        if not self.glass or not picture or not os.path.exists(picture):
+            self.backdrop, self.shown = None, None
+        elif picture != self.shown:
+            from .desktop import render_cover
+            sw, sh = screen_size()
+            try:
+                self.backdrop = render_cover(picture, max(sw // FROST, 1), max(sh // FROST, 1))
+            except GLib.Error:
+                self.backdrop = None
+            self.shown = picture
         self.redraw()
+
+    def frost(self, cr, width, height):
+        """The wallpaper under the card, blurred: a copy a twentieth of the size, stretched back
+        smoothly, so only its colours and light come through and the text stays easy to read."""
+        sw, sh = screen_size()
+        cr.save()
+        cr.rectangle(0, 0, width, height)
+        cr.clip()
+        cr.translate(-self.pos[0], -self.pos[1])
+        cr.scale(sw / self.backdrop.get_width(), sh / self.backdrop.get_height())
+        cr.set_source_surface(self.backdrop, 0, 0)
+        cr.get_source().set_filter(cairo.FILTER_GOOD)
+        cr.get_source().set_extend(cairo.EXTEND_PAD)
+        cr.paint()
+        cr.restore()
 
     def weeks(self, today):
         """The calendar's rows: whole weeks, Sunday first, from the period's first day to its last."""
@@ -236,12 +281,8 @@ class Card(Gtk.Window):
         return rows
 
     def place(self):
-        """Cover the screen, and put the card where it was dragged to, kept on screen; at first top
-        right, under the top bar (the desktop icons start top left)."""
-        sw, sh = screen_size()
-        self.resize(sw, sh)
-        self.set_size_request(sw, sh)
-        self.queue_draw()
+        """Put the card where it was dragged to, kept on screen; at first top right, under the top
+        bar (the desktop icons start top left)."""
         saved = core._read_json(PLACE, None)
         if isinstance(saved, dict) and "x" in saved and "y" in saved:
             x, y = saved["x"], saved["y"]
@@ -250,20 +291,17 @@ class Card(Gtk.Window):
             area = (display.get_primary_monitor() or display.get_monitor(0)).get_workarea()
             x, y = area.x + area.width - WIDTH - EDGE - MARGIN, area.y + MARGIN
         self.size = (WIDTH + EDGE, self.height + EDGE)
+        self.set_size_request(*self.size)
+        self.resize(*self.size)
         self.put(x, y)
 
     def put(self, x, y):
         """Move the card to (x, y) on the screen, keeping all of it on screen."""
         sw, sh = screen_size()
         w, h = self.size
-        x = max(0, min(int(x), sw - w))
-        y = max(0, min(int(y), sh - h))
-        old = self.pos
-        self.pos = (x, y)
+        self.pos = (max(0, min(int(x), sw - w)), max(0, min(int(y), sh - h)))
         if self.get_window() is not None:
-            self.queue_draw_area(*self.local(*old), w, h)
-            self.queue_draw_area(*self.local(x, y), w, h)
-            self.shape()
+            self.get_window().move(*self.pos)
 
     def local(self, x, y):
         """A point on the screen, in the window (which the window manager keeps where it likes)."""
@@ -285,20 +323,22 @@ class Card(Gtk.Window):
 
     def pressed(self, _widget, event):
         if event.button == 1 and event.type == Gdk.EventType._2BUTTON_PRESS:     # open or close the details
+            self.press = None
             self.expanded = not self.expanded
             self.hover, self.cells = None, []
             self.save()
             self.redraw()
         elif event.button == 1 and event.type == Gdk.EventType.BUTTON_PRESS:
-            self.drag = (event.x_root - self.pos[0], event.y_root - self.pos[1])
-            self.hover = None
-            self.point("grabbing")
-            self.redraw()
+            self.press = (event.x_root, event.y_root)
         return True
 
     def pointer(self, _widget, event):
-        if self.drag is not None:
-            self.put(event.x_root - self.drag[0], event.y_root - self.drag[1])
+        if self.press is not None and event.state & Gdk.ModifierType.BUTTON1_MASK:
+            if abs(event.x_root - self.press[0]) + abs(event.y_root - self.press[1]) > 4:   # a drag, not a click
+                self.press = None
+                self.hover = None
+                self.redraw()
+                self.begin_move_drag(1, int(event.x_root), int(event.y_root), event.time)
             return True
         x, y = event.x_root - self.pos[0], event.y_root - self.pos[1]
         hover = next((day for cx, cy, day in self.cells if cx <= x < cx + CELL and cy <= y < cy + ROW), None)
@@ -309,17 +349,17 @@ class Card(Gtk.Window):
         return True
 
     def released(self, _widget, event):
-        if event.button == 1 and self.drag is not None:
-            self.drag = None
-            self.point("grab")
-            self.save()
+        if event.button == 1:
+            self.press = None
         return True
 
     def save(self):
+        self.saving = 0
         core._write(PLACE, json.dumps({"x": self.pos[0], "y": self.pos[1], "expanded": self.expanded}) + "\n")
+        return False
 
     def left(self, *_):
-        if self.hover is not None and self.drag is None:
+        if self.hover is not None:
             self.hover = None
             self.redraw()
         return False
@@ -366,17 +406,15 @@ class Card(Gtk.Window):
         return True
 
     def redraw(self):
-        """Repaint the card only, not the whole see-through screen."""
-        if self.get_window() is not None:
-            self.queue_draw_area(*self.local(*self.pos), *self.size)
+        self.queue_draw()
 
     def resized(self, height):
         """The card grew or shrank (a six-week month, an error line): follow it."""
-        old = self.size
         self.height, self.size = height, (WIDTH + EDGE, height + EDGE)
-        if self.get_window() is not None:
-            self.queue_draw_area(*self.local(*self.pos), old[0], max(old[1], self.size[1]))
-            self.put(*self.pos)
+        self.set_size_request(*self.size)
+        self.resize(*self.size)
+        self.shape()
+        self.put(*self.pos)
         return False
 
     # --- drawing -------------------------------------------------------------------
@@ -401,6 +439,8 @@ class Card(Gtk.Window):
         cr.set_source_rgba(*palette.hex_to_rgb(colour), alpha)
         cr.move_to(x - w * align, y - h / 2)
         PangoCairo.show_layout(cr, layout)
+        if self.marks is not None:
+            self.marks.append((y - h / 2, y + h / 2))
         return w
 
     def label(self, cr, s, x, y, c, align=0.0):
@@ -408,7 +448,9 @@ class Card(Gtk.Window):
         return self.text(cr, s, x, y, 10, c["accent_text"], bold=True, align=align, spacing=1.5)
 
     def rule(self, cr, y, c):
-        """A dotted line across the card."""
+        """A dotted line across the card; on glass, the gap between panes does that instead."""
+        if self.glass and self.backdrop is not None:
+            return
         cr.set_source_rgba(*palette.hex_to_rgb(c["ink"]), 0.35)
         x = PAD
         while x < WIDTH - PAD:
@@ -437,161 +479,237 @@ class Card(Gtk.Window):
         cr.translate(*self.local(*self.pos))
         width, height = WIDTH, self.height
 
-        # the frame, like the app's windows: square, a hard shadow, a title strip and an ink border
-        cr.set_source_rgba(*ink, 1)
-        cr.rectangle(width, EDGE, EDGE, height)
-        cr.rectangle(EDGE, height, width - EDGE, EDGE)
-        cr.fill()
-        cr.rectangle(0, 0, width, height)
-        cr.set_source_rgba(*palette.hex_to_rgb(c["paper"]), 0.8 if self.glass else 1)
-        cr.fill()
-        cr.rectangle(0, 0, width, TITLE)
-        cr.set_source_rgba(*palette.hex_to_rgb(c["paper2"]), 0.85 if self.glass else 1)
-        cr.fill()
-        cr.set_source_rgba(*ink, 1)
-        cr.rectangle(0, TITLE, width, 1)
-        cr.fill()
-        cr.rectangle(0.5, 0.5, width - 1, height - 1)
-        cr.set_line_width(1)
-        cr.stroke()
-        cr.set_source_rgba(*accent, 1)
-        cr.rectangle(PAD, TITLE / 2 - 4, 8, 8)
-        cr.fill()
-        self.text(cr, "logtime", PAD + 16, TITLE / 2, 12, c["ink"], bold=True)
-        self.text(cr, "less ▴" if self.expanded else "more ▾", width - PAD, TITLE / 2, 11, c["muted"], align=1)
-
-        # always shown: today, the month and this session, live, as 1337 will count them
-        span_seconds = (midnight(end) - midnight(first)).total_seconds()
-        elapsed = (now - midnight(first)).total_seconds()
-        expected = GOAL * 3600 * elapsed / span_seconds  # where logging the goal evenly would be now
-        y = TITLE + 22
-        self.label(cr, "TODAY", PAD, y, c)
-        if self.since:
-            w = self.text(cr, "LIVE", width - PAD, y, 10, c["accent_text"], bold=True, align=1, spacing=1.5)
-            cr.set_source_rgba(*accent, 1 if blink else 0.25)
-            cr.rectangle(width - PAD - w - 13, y - 3.5, 7, 7)
+        def content(cr):
+            """Everything on the card, the title's words included; returns its height and the
+            hovered day."""
+            cr.set_source_rgba(*accent, 1)
+            cr.rectangle(PAD, TITLE / 2 - 4, 8, 8)
             cr.fill()
-        y += 30
-        counted = self.days.get(today, 0)
-        t = int(counted * 3600 + (live if start == today else 0))
-        w = self.text(cr, f"{t // 3600}:{t % 3600 // 60:02d}", PAD - 2, y, 40, c["ink"], bold=True)
-        self.text(cr, f":{t % 60:02d}", PAD - 2 + w, y + 6, 20, c["accent_text"], bold=True)
+            self.text(cr, "logtime", PAD + 16, TITLE / 2, 12, c["ink"], bold=True)
+            self.text(cr, "less ▴" if self.expanded else "more ▾", width - PAD, TITLE / 2, 11, c["muted"], align=1)
+            self.marks = []
 
-        y += 42
-        self.label(cr, "THIS MONTH", PAD, y, c)
-        self.text(cr, span(today), width - PAD, y, 10, c["muted"], bold=True, align=1)
-        y += 26
-        if self.total is None:
-            self.text(cr, "loading…", PAD, y, 16, c["muted"], bold=True)
-        else:
-            m = int(month)
-            w = self.text(cr, f"{m // 3600}h {m % 3600 // 60:02d}m", PAD - 1, y, 30, c["ink"], bold=True)
-            self.text(cr, f"/ {GOAL}h", PAD + w + 6, y + 4, 14, c["muted"], bold=True)
-            self.text(cr, f"{min(month / 3600 / GOAL, 1):.0%}", width - PAD, y + 2, 18, c["accent_text"],
-                      bold=True, align=1)
-        y += 22
-        y += self.meter(cr, y, total * 3600, month, expected, blink, c)
-        y += 18
-        if self.since:
-            line = f"session {hours(live)} · {self.host} since {self.since:%H:%M}"
-            if self.total is not None:   # 1337's site rounds to whole hours
-                self.text(cr, f"1337 site now {total}h · after logout {int(month / 3600 + 0.5)}h", PAD, y, 11,
-                          c["ink"], bold=True)
-                y += 18
-        else:
-            line = self.host
-        self.text(cr, line, PAD, y, 11, c["muted"])
-        if self.error:
-            y += 18
-            self.text(cr, self.error, PAD, y, 11, c["ink"])
-        hovered = None
-        if not self.expanded:
-            self.cells = []
-            y += 4 + PAD
-            if y != self.height:
-                GLib.idle_add(self.resized, y)
-            return True
-        y += 18
-        self.rule(cr, y, c)
-
-        # the period's calendar
-        y += 20
-        for i, name in enumerate("SMTWTFS"):
-            self.text(cr, name, PAD + i * CELL + CELL / 2, y, 10, c["muted"], bold=True, align=0.5)
-        y += 10
-        sheet = palette.hex_to_rgb(c["sheet"])
-        self.cells = []
-        for week in self.weeks(today):
-            for i, day in enumerate(week):
-                if not first <= day < end:
-                    continue
-                x = PAD + i * CELL
-                self.cells.append((x, y, day))
-                seconds = self.days.get(day, 0) * 3600 + (live if day == start else 0)
-                shade = 0.15 + 0.85 * min(seconds / FULL_DAY, 1) if seconds else 0
-                cr.rectangle(x + 2, y + 2, CELL - 4, ROW - 4)
-                if seconds:
-                    cr.set_source_rgba(*accent, shade)
-                else:
-                    cr.set_source_rgba(*ink, 0.05)
+            # always shown: today, the month and this session, live, as 1337 will count them
+            span_seconds = (midnight(end) - midnight(first)).total_seconds()
+            elapsed = (now - midnight(first)).total_seconds()
+            expected = GOAL * 3600 * elapsed / span_seconds  # where logging the goal evenly would be now
+            y = TITLE + 22
+            self.label(cr, "TODAY", PAD, y, c)
+            if self.since:
+                w = self.text(cr, "LIVE", width - PAD, y, 10, c["accent_text"], bold=True, align=1, spacing=1.5)
+                cr.set_source_rgba(*accent, 1 if blink else 0.25)
+                cr.rectangle(width - PAD - w - 13, y - 3.5, 7, 7)
                 cr.fill()
-                if day == today or day == self.hover:
-                    cr.rectangle(x + 2, y + 2, CELL - 4, ROW - 4)
-                    cr.set_source_rgba(*ink, 1)
-                    cr.set_line_width(2 if day == today else 1)
-                    cr.stroke()
-                if day == self.hover:
-                    hovered = (x, y, day, seconds)
-                # light digits on the darker shades (bold, so 3:1 reads well), dark ones elsewhere
-                fill = palette.rgb_to_hex([a * shade + b * (1 - shade) for a, b in zip(accent, sheet)])
-                light = palette.contrast(c["sheet"], fill) >= 3
-                colour = c["sheet"] if light else c["ink"]
-                self.text(cr, str(day.day), x + CELL / 2, y + ROW / 2, 12, colour, bold=light or day.day == 1,
-                          align=0.5, alpha=0.4 if day > today else 1)
-            y += ROW
-        y += 8
-        self.rule(cr, y, c)
+            y += 30
+            counted = self.days.get(today, 0)
+            t = int(counted * 3600 + (live if start == today else 0))
+            w = self.text(cr, f"{t // 3600}:{t % 3600 // 60:02d}", PAD - 2, y, 40, c["ink"], bold=True)
+            self.text(cr, f":{t % 60:02d}", PAD - 2 + w, y + 6, 20, c["accent_text"], bold=True)
 
-        # the goal: one cell an hour, in rows of forty
-        y += 20
-        left, days_left = max(GOAL * 3600 - month, 0), (end - today).days
-        y += 4
-
-        # the numbers that matter
-        ahead = month - expected
-        stats = [("LEFT", hours(left) if left else "done"),
-                 ("PER DAY", hours(left / days_left) if left else "—"),
-                 ("PACE", ("+" if ahead >= 0 else "−") + hours(abs(ahead)))]
-        third = (width - 2 * PAD) / 3
-        for i, (name, value) in enumerate(stats):
-            x = PAD + i * third
-            self.text(cr, name, x, y, 9, c["muted"], bold=True, spacing=1.5)
-            colour = c["accent_text"] if name == "PACE" and ahead >= 0 else c["ink"]
-            self.text(cr, value, x, y + 18, 15, colour, bold=True)
-        y += 40
-
-        # where this pace lands you
-        rate = month / elapsed if elapsed > 0 else 0         # logged seconds per second gone
-        if not left:
-            line = "goal reached ✓"
-        elif rate:
-            eta = now + datetime.timedelta(seconds=left / rate)
-            if eta < midnight(end):
-                line = f"→ {GOAL}h on {eta:%a %d %b} at this pace"
+            y += 42
+            self.marks.append(None)          # a new pane of glass from here
+            self.label(cr, "THIS MONTH", PAD, y, c)
+            self.text(cr, span(today), width - PAD, y, 10, c["muted"], bold=True, align=1)
+            y += 26
+            if self.total is None:
+                self.text(cr, "loading…", PAD, y, 16, c["muted"], bold=True)
             else:
-                last = end - datetime.timedelta(days=1)
-                projected = (month + rate * (midnight(end) - now).total_seconds()) / 3600
-                line = f"→ {projected:.0f}h by {last:%d %b} at this pace"
-        else:
-            line = "→ nothing logged yet this month"
-        self.text(cr, line, PAD, y, 11, c["muted"])
-        y += PAD + 4
+                m = int(month)
+                w = self.text(cr, f"{m // 3600}h {m % 3600 // 60:02d}m", PAD - 1, y, 30, c["ink"], bold=True)
+                self.text(cr, f"/ {GOAL}h", PAD + w + 6, y + 4, 14, c["muted"], bold=True)
+                self.text(cr, f"{min(month / 3600 / GOAL, 1):.0%}", width - PAD, y + 2, 18, c["accent_text"],
+                          bold=True, align=1)
+            y += 22
+            y += self.meter(cr, y, total * 3600, month, expected, blink, c)
+            y += 18
+            if self.since:
+                line = f"session {hours(live)} · {self.host} since {self.since:%H:%M}"
+                if self.total is not None:   # 1337's site rounds to whole hours
+                    self.text(cr, f"1337 site now {total}h · after logout {int(month / 3600 + 0.5)}h", PAD, y, 11,
+                              c["ink"], bold=True)
+                    y += 18
+            else:
+                line = self.host
+            self.text(cr, line, PAD, y, 11, c["muted"])
+            if self.error:
+                y += 18
+                self.text(cr, self.error, PAD, y, 11, c["ink"])
+            hovered = None
+            if not self.expanded:
+                self.cells = []
+                return y + 4 + PAD, None
+            y += 18
+            self.rule(cr, y, c)
+            self.marks.append(None)
 
+            # the period's calendar
+            y += 20
+            for i, name in enumerate("SMTWTFS"):
+                self.text(cr, name, PAD + i * CELL + CELL / 2, y, 10, c["muted"], bold=True, align=0.5)
+            y += 10
+            sheet = palette.hex_to_rgb(c["sheet"])
+            self.cells = []
+            for week in self.weeks(today):
+                for i, day in enumerate(week):
+                    if not first <= day < end:
+                        continue
+                    x = PAD + i * CELL
+                    self.cells.append((x, y, day))
+                    seconds = self.days.get(day, 0) * 3600 + (live if day == start else 0)
+                    shade = 0.15 + 0.85 * min(seconds / FULL_DAY, 1) if seconds else 0
+                    cr.rectangle(x + 2, y + 2, CELL - 4, ROW - 4)
+                    if seconds:
+                        cr.set_source_rgba(*accent, shade)
+                    else:
+                        cr.set_source_rgba(*ink, 0.05)
+                    cr.fill()
+                    if day == today or day == self.hover:
+                        cr.rectangle(x + 2, y + 2, CELL - 4, ROW - 4)
+                        cr.set_source_rgba(*ink, 1)
+                        cr.set_line_width(2 if day == today else 1)
+                        cr.stroke()
+                    if day == self.hover:
+                        hovered = (x, y, day, seconds)
+                    # light digits on the darker shades (bold, so 3:1 reads well), dark ones elsewhere
+                    fill = palette.rgb_to_hex([a * shade + b * (1 - shade) for a, b in zip(accent, sheet)])
+                    light = palette.contrast(c["sheet"], fill) >= 3
+                    colour = c["sheet"] if light else c["ink"]
+                    self.text(cr, str(day.day), x + CELL / 2, y + ROW / 2, 12, colour, bold=light or day.day == 1,
+                              align=0.5, alpha=0.4 if day > today else 1)
+                y += ROW
+            y += 8
+            self.rule(cr, y, c)
+            self.marks.append(None)
+
+            # the goal: one cell an hour, in rows of forty
+            y += 20
+            left, days_left = max(GOAL * 3600 - month, 0), (end - today).days
+            y += 4
+
+            # the numbers that matter
+            ahead = month - expected
+            stats = [("LEFT", hours(left) if left else "done"),
+                     ("PER DAY", hours(left / days_left) if left else "—"),
+                     ("PACE", ("+" if ahead >= 0 else "−") + hours(abs(ahead)))]
+            third = (width - 2 * PAD) / 3
+            for i, (name, value) in enumerate(stats):
+                x = PAD + i * third
+                self.text(cr, name, x, y, 9, c["muted"], bold=True, spacing=1.5)
+                colour = c["accent_text"] if name == "PACE" and ahead >= 0 else c["ink"]
+                self.text(cr, value, x, y + 18, 15, colour, bold=True)
+            y += 40
+
+            # where this pace lands you
+            rate = month / elapsed if elapsed > 0 else 0         # logged seconds per second gone
+            if not left:
+                line = "goal reached ✓"
+            elif rate:
+                eta = now + datetime.timedelta(seconds=left / rate)
+                if eta < midnight(end):
+                    line = f"→ {GOAL}h on {eta:%a %d %b} at this pace"
+                else:
+                    last = end - datetime.timedelta(days=1)
+                    projected = (month + rate * (midnight(end) - now).total_seconds()) / 3600
+                    line = f"→ {projected:.0f}h by {last:%d %b} at this pace"
+            else:
+                line = "→ nothing logged yet this month"
+            self.text(cr, line, PAD, y, 11, c["muted"])
+            y += PAD + 4
+            return y, hovered
+
+        # a first pass on a scrap surface finds the rows with text, so the glass goes under them;
+        # then the frame, and the content again for real
+        frosted = self.glass and self.backdrop is not None
+        content(cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1)))
+        marks, self.marks = self.marks, None
+        self.frame(cr, c, width, height, frosted, marks)
+        y, hovered = content(cr)
+        self.marks = None
         if hovered:
             self.tooltip(cr, c, *hovered, today, live if hovered[2] == start else 0)
         if y != self.height:
             GLib.idle_add(self.resized, y)
         return True
+
+    def frame(self, cr, c, width, height, frosted, marks):
+        """The card itself: square with a hard shadow, like the app's windows. As glass, a clear pane
+        with a bevelled rim and frosted panes only under its rows of text; otherwise a tinted sheet."""
+        ink = palette.hex_to_rgb(c["ink"])
+        cr.set_source_rgba(*ink, 1)
+        cr.rectangle(width, EDGE, EDGE, height)
+        cr.rectangle(EDGE, height, width - EDGE, EDGE)
+        cr.fill()
+        if not frosted:
+            cr.rectangle(0, 0, width, height)
+            cr.set_source_rgba(*palette.hex_to_rgb(c["paper"]), 0.8 if self.glass else 1)
+            cr.fill()
+            cr.rectangle(0, 0, width, TITLE)
+            cr.set_source_rgba(*palette.hex_to_rgb(c["paper2"]), 0.85 if self.glass else 1)
+            cr.fill()
+            cr.set_source_rgba(*ink, 1)
+            cr.rectangle(0, TITLE, width, 1)
+            cr.fill()
+            cr.rectangle(0.5, 0.5, width - 1, height - 1)
+            cr.set_line_width(1)
+            cr.stroke()
+            return
+
+        # the clear pane: barely tinted, with light running down it
+        cr.rectangle(0, 0, width, height)
+        cr.set_source_rgba(*palette.hex_to_rgb(c["paper"]), 0.06)
+        cr.fill()
+        sheen = cairo.LinearGradient(0, 0, width * 0.4, height)
+        sheen.add_color_stop_rgba(0, 1, 1, 1, 0.16)
+        sheen.add_color_stop_rgba(0.5, 1, 1, 1, 0.02)
+        sheen.add_color_stop_rgba(1, 1, 1, 1, 0.08)
+        cr.rectangle(0, 0, width, height)
+        cr.set_source(sheen)
+        cr.fill()
+
+        # frosted panes: the title strip, and one under each run of rows with text
+        panes = [(0, 0, width, TITLE, c["paper2"])]
+        bands, split = [], True
+        for mark in marks:                               # in drawing order; None starts a new pane
+            if mark is None:
+                split = True
+            elif split or not bands:
+                bands.append(list(mark))
+                split = False
+            else:
+                bands[-1] = [min(bands[-1][0], mark[0]), max(bands[-1][1], mark[1])]
+        panes += [(PAD - 8, top - 6, width - 2 * PAD + 16, bottom - top + 12, c["paper"]) for top, bottom in bands]
+        for x, y, w, h, colour in panes:
+            cr.save()
+            cr.rectangle(x, y, w, h)
+            cr.clip()
+            self.frost(cr, width, height)
+            cr.rectangle(x, y, w, h)
+            cr.set_source_rgba(*palette.hex_to_rgb(colour), 0.5)
+            cr.fill()
+            cr.restore()
+            cr.set_source_rgba(1, 1, 1, 0.45)            # each pane's edge: lit on top, shaded below
+            cr.rectangle(x, y, w, 1)
+            cr.fill()
+            cr.set_source_rgba(*ink, 0.18)
+            cr.rectangle(x, y + h - 1, w, 1)
+            cr.fill()
+
+        # the bevelled rim, like embossed glass: bright where the light falls, dark on the far side
+        rim = cairo.LinearGradient(0, 0, width, height)
+        rim.add_color_stop_rgba(0, 1, 1, 1, 0.95)
+        rim.add_color_stop_rgba(0.45, 1, 1, 1, 0.35)
+        rim.add_color_stop_rgba(1, *ink, 0.55)
+        cr.rectangle(1.5, 1.5, width - 3, height - 3)
+        cr.set_source(rim)
+        cr.set_line_width(3)
+        cr.stroke()
+        cr.rectangle(3.5, 3.5, width - 7, height - 7)
+        cr.set_source_rgba(1, 1, 1, 0.3)
+        cr.set_line_width(1)
+        cr.stroke()
+        cr.rectangle(0.5, 0.5, width - 1, height - 1)
+        cr.set_source_rgba(*ink, 0.7)
+        cr.stroke()
 
     def meter(self, cr, y, done, month, expected, blink, c):
         """The goal as one cell an hour, in rows of forty split in tens: what 1337 has counted, solid;
@@ -623,6 +741,8 @@ class Card(Gtk.Window):
                 cr.set_source_rgba(*ink, 0.55)
                 cr.set_line_width(1)
                 cr.stroke()
+        if self.marks is not None:
+            self.marks.append((y, y + rows * step - (step - high)))
         return rows * step - (step - high)
 
     def tooltip(self, cr, c, x, y, day, seconds, today, live):

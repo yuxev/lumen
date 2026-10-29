@@ -190,19 +190,25 @@ def build(samples):
 # --- GTK stylesheet ---------------------------------------------------------------
 
 GLASS = """
-/* transparent windows: the wallpaper shows through, text stays solid. Anything that holds
-   text adds a second translucent layer, so reading areas stay ~84% solid. */
+/* glass windows: clear panes the wallpaper shows through, with a bevelled rim (lit on the top
+   and left, shaded on the bottom and right). Where text sits (views, lists, entries) a faint
+   frost of the window's own colour sets it off, never a white sheet. */
 window.background:not(.popup):not(tooltip):not(.solid-csd):not(.desktopwindow) {
-  background-color: alpha(@window_bg_color, 0.70);
+  background-color: alpha(@window_bg_color, 0.12);
+  box-shadow: inset 2px 2px alpha(white, 0.55), inset -2px -2px alpha(black, 0.22);
 }
-headerbar, .titlebar:not(headerbar) { background-color: alpha(@headerbar_bg_color, 0.45); }
-headerbar:backdrop, .titlebar:not(headerbar):backdrop { background-color: alpha(@headerbar_backdrop_color, 0.4); }
+headerbar, .titlebar:not(headerbar) {
+  background-color: alpha(@headerbar_bg_color, 0.2);
+  box-shadow: inset 0 1px alpha(white, 0.5), inset 0 -1px alpha(black, 0.15);
+}
+headerbar:backdrop, .titlebar:not(headerbar):backdrop { background-color: alpha(@headerbar_backdrop_color, 0.15); }
 .view, textview text, iconview, treeview.view, list, listview, columnview, .content-view,
 .boxed-list, scrolledwindow > viewport > list, entry, spinbutton {
-  background-color: alpha(@view_bg_color, 0.45);
+  background-color: alpha(@window_bg_color, 0.3);
 }
+entry, spinbutton, .boxed-list { box-shadow: inset 1px 1px alpha(black, 0.12), inset -1px -1px alpha(white, 0.5); }
 .sidebar, placessidebar, stacksidebar, .navigation-sidebar, .sidebar-pane {
-  background-color: alpha(@sidebar_bg_color, 0.4);
+  background-color: alpha(@sidebar_bg_color, 0.15);
 }
 list row, listview row, .card, frame > border { background-color: transparent; }
 /* menus, popovers, tooltips and dialogs stay solid: they float over busy content */
@@ -210,6 +216,19 @@ popover > contents, popover.background > contents, menu, .menu, .context-menu, t
 tooltip.background, messagedialog, dialog.background, window.dialog {
   background-color: @popover_bg_color;
 }
+"""
+
+
+# Some GTK 3 apps paint a solid window of their own over the theme's, and GTK ranks an app's own
+# styles above the theme's: only ~/.config/gtk-3.0/gtk.css ranks above them, so this goes there.
+# It names no colours of its own, only the theme's, so recolouring still reaches open apps live.
+APP_GLASS = """/* Wallpaper Studio — glass for apps that paint their own window; changes are overwritten */
+.nautilus-window, .nautilus-window notebook, .nautilus-window notebook > stack {
+  background: alpha(@window_bg_color, 0.12);
+}
+.nautilus-path-bar scrolledwindow { background: alpha(@window_bg_color, 0.2); }
+.nautilus-path-bar scrolledwindow undershoot.left,
+.nautilus-path-bar scrolledwindow undershoot.right { background: none; }
 """
 
 

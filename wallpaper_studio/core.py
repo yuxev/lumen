@@ -30,6 +30,14 @@ CONFIG = os.path.join(CONFIG_DIR, "config.json")
 STATE = os.path.join(CONFIG_DIR, "state.json")
 ORIGINALS = os.path.join(CONFIG_DIR, "originals.json")
 THEME_CSS = os.path.join(CONFIG_DIR, "theme.css")
+APP_GLASS_CSS = os.path.join(CONFIG_DIR, "app-glass.css")     # glass for apps that paint their own window
+# GNOME's own wallpaper setting is locked at 42, but GNOME Shell draws the image named by
+# SHELL_BACKGROUND_IMAGE instead when it's set (the overview, and behind everything), and reloads
+# it when the file changes: a copy of the wallpaper is kept there, and the variable set for the
+# session at login
+SHELL_BACKGROUND = os.path.join(CACHE_DIR, "shell-background")
+SHELL_ENV = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.join(HOME, ".config")),
+                         "environment.d", "70-wallpaper-studio.conf")
 HOOKS = os.path.join(CONFIG_DIR, "hooks")
 STOPPED = os.path.join(CONFIG_DIR, "stopped")   # `wallpaper-studio stop` leaves this until `start`
 LOCK = os.path.join(CONFIG_DIR, ".lock")
@@ -51,6 +59,9 @@ DEFAULT_CONFIG = {
     "glass": False,                 # see-through windows
     "terminal": True,               # recolour GNOME Terminal
     "logtime": True,                # your 42 logtime on the desktop (logtime.py)
+    # apps that draw their own windows, so the glass theme can't reach them: with glass on, the
+    # whole window is made see-through instead (its text too), by WM_CLASS
+    "glass_apps": {"brave-browser": 0.88, "discord": 0.88},
 }
 
 # settings we touch, saved once before the first change so Restore can put them back
@@ -285,6 +296,34 @@ def set_wallpaper(path):
     apply_theme()
 
 
+def shell_background(still):
+    """Show `still` (a picture, or a video's frame) wherever GNOME Shell draws its own wallpaper.
+    Written in place, not replaced, so the Shell's watch on the file sees it change."""
+    try:
+        with open(still, "rb") as f:
+            data = f.read()
+        with contextlib.suppress(OSError), open(SHELL_BACKGROUND, "rb") as f:
+            if f.read() == data:
+                data = None
+        if data is not None:
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            with open(SHELL_BACKGROUND, "wb") as f:
+                f.write(data)
+        line = f"SHELL_BACKGROUND_IMAGE={SHELL_BACKGROUND}\n"
+        if _read_text(SHELL_ENV) != line:
+            _write(SHELL_ENV, line)
+    except OSError:
+        pass
+
+
+def _read_text(path):
+    try:
+        with open(path) as f:
+            return f.read()
+    except OSError:
+        return None
+
+
 def wallpapers(folder=None):
     folder = folder or load_config()["folder"]
     try:
@@ -354,8 +393,8 @@ def _switch_theme():
          GLib.Variant("s", OUR_THEMES[1] if current == OUR_THEMES[0] else OUR_THEMES[0]))
 
 
-def _add_import(gtk_css):
-    line = CSS_IMPORT.format(THEME_CSS)
+def _add_import(gtk_css, css=THEME_CSS):
+    line = CSS_IMPORT.format(css)
     try:
         with open(gtk_css) as f:
             text = f.read()
@@ -432,8 +471,14 @@ def apply_theme():
         _write_themes(dark)
         # GTK 3 apps take the colours from the theme, live. libadwaita apps ignore themes and only
         # read gtk-4.0/gtk.css when they start, so it imports the colours too (the Wallpaper Studio
-        # window reloads it itself). A gtk-3.0 import would pin GTK 3 apps to their start-up colours.
-        _remove_import(os.path.join(HOME, ".config", "gtk-3.0", "gtk.css"))
+        # window reloads it itself). A gtk-3.0 import of the colours would pin GTK 3 apps to their
+        # start-up colours, so with glass on it imports only rules that name the theme's colours.
+        gtk3 = os.path.join(HOME, ".config", "gtk-3.0", "gtk.css")
+        if config["glass"]:
+            _write(APP_GLASS_CSS, palette.APP_GLASS)
+            _add_import(gtk3, APP_GLASS_CSS)
+        else:
+            _remove_import(gtk3)
         _add_import(os.path.join(HOME, ".config", "gtk-4.0", "gtk.css"))
 
         if config["mode"] != "auto":     # in auto the system's own setting decides, so leave it alone
@@ -488,8 +533,9 @@ def restore():
             os.remove(uid_file)
         for version in ("gtk-3.0", "gtk-4.0"):
             _remove_import(os.path.join(HOME, ".config", version, "gtk.css"))
-        with contextlib.suppress(FileNotFoundError):
-            os.remove(THEME_CSS)
+        for css in (THEME_CSS, APP_GLASS_CSS, SHELL_ENV, SHELL_BACKGROUND):
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(css)
         theme = Gio.Settings.new("org.gnome.desktop.interface").get_string("gtk-theme")
         if theme in OUR_THEMES:          # nothing was saved to go back to
             _set("org.gnome.desktop.interface", "gtk-theme", GLib.Variant("s", "Adwaita"))
