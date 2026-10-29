@@ -91,6 +91,19 @@ printf 'background %s\nforeground %s\ncursor %s\n' "$WS_PAPER" "$WS_INK" "$WS_AC
 pkill -USR1 kitty
 ```
 
+## Logtime on the desktop
+
+Shows your logtime on the desktop, counted the way 1337 counts it for the scholarship: the hours come
+from 1337's own logtime service ([logtime-med.1337.ma](https://logtime-med.1337.ma)), so there's no
+key and no setup. It uses the login you're signed in with.
+
+The card is small: **today** and **this month** (the 28th to the 27th of the next month, out of 120h),
+both ticking live, and the month as one cell per hour. 1337 only counts a session once you log out,
+all of it on the day it began; the card adds the session you're in now the same way, so it always
+shows what 1337 will. Double-click it for the calendar (hover a day for its hours), what's left, the
+hours per day you need, your pace and when you'll reach 120h. Drag it anywhere; it stays where you
+leave it. Hide it with `wallpaper-studio logtime off`.
+
 ## Command line
 
 ```
@@ -98,6 +111,9 @@ wallpaper-studio                  open the window
 wallpaper-studio set FILE         use a picture or video
 wallpaper-studio next             a random different one from your folder
 wallpaper-studio light|dark|auto  colour mode
+wallpaper-studio logtime          today's and this month's logtime as 1337 counts it, in the terminal
+wallpaper-studio logtime on|off    show or hide the desktop card
+wallpaper-studio logtime login LOGIN   follow another login than the one you're signed in with
 wallpaper-studio awake [MINUTES|on|off]   keep your session active so it doesn't lock (default 60 minutes)
 wallpaper-studio stop             stop everything (stays off after logging in again); nothing is uninstalled
 wallpaper-studio start            start it again (opening the app does too)
@@ -123,6 +139,7 @@ It restores your original look first, then removes the app.
 | `wallpaper_studio/core.py` | Applies them: a small GTK theme ("Wallpaper Studio A"/"B" in `~/.local/share/themes`, adw-gtk3 underneath plus your colours), the light/dark setting and a GNOME Terminal profile. Saves your original settings first. GTK only re-reads a theme when its name changes, so each recolour flips between the two identical copies and open apps restyle live. |
 | `wallpaper_studio/desktop.py` | A small helper started at login. GNOME's own wallpaper is locked at 42, so it draws the wallpaper in a desktop window behind everything. Pictures cost almost nothing once drawn. Videos play through VLC and pause when a window is maximised or the screen is locked. It also handles the rotation timer, follows the system's light/dark switch in auto mode, and keeps the session active while *Keep screen awake* is on (GNOME's idle inhibitor, plus a 1-pixel pointer nudge every 50 s, since some locks only count real input). |
 | `wallpaper_studio/app.py` | The window (GTK 4 + libadwaita). |
+| `wallpaper_studio/logtime.py` | Your logtime: reads 1337's hours every 5 minutes, adds the session you're in, and draws the desktop card (GTK 3), above the desktop icons, taking the pointer only on the card. |
 
 Everything it writes lives in `~/.config/wallpaper-studio`, `~/.cache/wallpaper-studio` and
 `~/.local/share/wallpaper-studio`.

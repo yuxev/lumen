@@ -7,6 +7,9 @@
     wallpaper-studio awake [MINUTES|on|off]
                                      keep the screen from locking while you read or watch
                                      (default 60 minutes; "on" lasts until you turn it off or log out)
+    wallpaper-studio logtime [on|off|login LOGIN]
+                                     your logtime as 1337 counts it, also shown live on the desktop:
+                                     this session and the scholarship month (no setup needed)
     wallpaper-studio stop            stop everything (the wallpaper, rotation, keep-awake, the window)
                                      until you start it again; nothing is uninstalled
     wallpaper-studio start           start it again
@@ -20,6 +23,35 @@ import sys
 # settings to a private file GNOME never reads; always talk to the real settings store
 if os.environ.get("GSETTINGS_BACKEND") == "keyfile":
     os.environ["GSETTINGS_BACKEND"] = "dconf"
+
+
+def logtime_command(args):
+    from . import core, logtime
+    arg = args[0] if args else ""
+    if arg in ("on", "off"):
+        core.save_config(logtime=arg == "on")
+        if arg == "on":
+            core.start()
+    elif arg == "login" and len(args) == 2:
+        core.save_config(logtime_login=args[1])
+        print(f"Logtime now follows {args[1]}.")
+    elif arg == "":
+        today = now().date()
+        try:
+            total, days = logtime.source().month(today)
+        except logtime.ApiError as e:
+            print(f"wallpaper-studio: {e}", file=sys.stderr)
+            return 1
+        print(logtime.summary(total, days, today))
+    else:
+        print("usage: wallpaper-studio logtime [on|off|login LOGIN]", file=sys.stderr)
+        return 1
+    return 0
+
+
+def now():
+    import datetime
+    return datetime.datetime.now().astimezone()
 
 
 def main(argv):
@@ -60,6 +92,8 @@ def main(argv):
             else:
                 print("usage: wallpaper-studio awake [MINUTES|on|off]", file=sys.stderr)
                 return 1
+        elif command == "logtime":
+            return logtime_command(argv[2:])
         elif command == "stop":
             core.stop()
             print("Wallpaper Studio stopped. Your colours stay as they are; nothing was uninstalled.\n"

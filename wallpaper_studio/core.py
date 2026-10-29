@@ -50,6 +50,7 @@ DEFAULT_CONFIG = {
     "rotate_hours": 0,              # 0 = never change by itself
     "glass": False,                 # see-through windows
     "terminal": True,               # recolour GNOME Terminal
+    "logtime": True,                # your 42 logtime on the desktop (logtime.py)
 }
 
 # settings we touch, saved once before the first change so Restore can put them back

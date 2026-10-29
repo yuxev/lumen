@@ -57,6 +57,7 @@ XCreateSimpleWindow = _sig("XCreateSimpleWindow", XID, P, XID, ctypes.c_int, cty
 XInternAtom = _sig("XInternAtom", XID, P, ctypes.c_char_p, ctypes.c_int)
 XChangeProperty = _sig("XChangeProperty", ctypes.c_int, P, XID, XID, XID, ctypes.c_int, ctypes.c_int,
                        P, ctypes.c_int)
+XDeleteProperty = _sig("XDeleteProperty", ctypes.c_int, P, XID, XID)
 XStoreName = _sig("XStoreName", ctypes.c_int, P, XID, ctypes.c_char_p)
 XMapWindow = _sig("XMapWindow", ctypes.c_int, P, XID)
 XUnmapWindow = _sig("XUnmapWindow", ctypes.c_int, P, XID)
@@ -112,7 +113,7 @@ PROPERTY_NOTIFY = 28
 PROPERTY_CHANGE_MASK = 1 << 22
 SUBSTRUCTURE_MASKS = (1 << 19) | (1 << 20)   # SubstructureNotify | SubstructureRedirect
 ZPIXMAP = 2
-XA_ATOM, XA_CARDINAL = 4, 6
+XA_ATOM, XA_CARDINAL, XA_WINDOW = 4, 6, 33
 PROP_REPLACE = 0
 
 
@@ -184,13 +185,20 @@ class Desktop:
         GLib.idle_add(self.sync_awake)
         # the desktop-icons extension lowers its window under everything whenever any window (even a
         # tooltip) opens or closes, which hides the icons under the wallpaper; watch the stacking order
-        # and step back under the icons the moment that happens, instead of on the next poll
+        # to claim new icon windows (see keep_icons_above), and step back under the icons if one still
+        # ends up below, instead of on the next poll
         self.stacking = self.atom("_NET_CLIENT_LIST_STACKING")
+        self.checked = set()         # windows already looked at for keep_icons_above
+        self.icons = set()           # desktop-icon windows kept above ours
+        self.links = {}              # window -> the window it's kept above (WM_TRANSIENT_FOR set)
+        self.card = None             # the logtime card, while it's on (logtime.py)
+        self.logtime_pending = 0
         self.restacks = []           # recent restack times, to back off if something fights back
         self.restack_pending = 0
         XSelectInput(self.dpy, self.root, PROPERTY_CHANGE_MASK)
         GLib.io_add_watch(XConnectionNumber(self.dpy), GLib.IO_IN, self.drain)
         GLib.idle_add(self.refresh)
+        GLib.idle_add(self.sync_logtime)
         GLib.timeout_add_seconds(2, self.watch_video)
         # auto light/dark follows the system setting: recolour as soon as it's flipped
         self.interface = Gio.Settings.new("org.gnome.desktop.interface")
@@ -216,12 +224,35 @@ class Desktop:
         return False
 
     def on_change(self, _monitor, file, _other, _event):
+        if file.get_basename() == "config.json":
+            if self.logtime_pending:
+                GLib.source_remove(self.logtime_pending)
+            self.logtime_pending = GLib.timeout_add(300, self.sync_logtime)
+            return
         if file.get_basename() != "state.json":
             return
         # a change arrives as several file events; act once they settle
         if self.pending:
             GLib.source_remove(self.pending)
         self.pending = GLib.timeout_add(300, self.refresh)
+
+    # --- logtime -----------------------------------------------------------------------------
+
+    def sync_logtime(self):
+        """Show the logtime card while it's turned on and has somewhere to read from, and only then."""
+        self.logtime_pending = 0
+        if not core.load_config()["logtime"]:
+            source = None
+        else:
+            from . import logtime      # GTK 3 and the API client load only for those who use it
+            source = logtime.source()
+        if self.card is not None and (source is None or source.key != self.card.api.key):
+            self.card.close()
+            self.card = None
+            self.on_restacked()
+        if source is not None and self.card is None:
+            self.card = logtime.Card(source, self.on_restacked)
+        return False
 
     # --- keep screen awake -----------------------------------------------------------------
 
@@ -339,6 +370,8 @@ class Desktop:
 
     def refresh(self):
         self.pending = 0
+        if self.card is not None:
+            self.card.recolour()
         state = core.load_state()
         target, still = state.get("wallpaper"), state.get("still")
         width, height = XDisplayWidth(self.dpy, self.screen), XDisplayHeight(self.dpy, self.screen)
@@ -383,7 +416,10 @@ class Desktop:
         if self.win is None or not self.mapped:
             return False
         stack = [w for w in self.window_atoms(self.root, "_NET_CLIENT_LIST_STACKING") if w]
-        if not stack or stack[0] == self.win:
+        if not stack:
+            return False
+        self.keep_icons_above(stack)
+        if stack[0] == self.win:
             return False
         desktop = self.atom("_NET_WM_WINDOW_TYPE_DESKTOP")
         others = [w for w in stack if w != self.win and desktop in self.window_atoms(w, "_NET_WM_WINDOW_TYPE")]
@@ -397,6 +433,44 @@ class Desktop:
         XSendEvent(self.dpy, self.root, 0, SUBSTRUCTURE_MASKS, ctypes.byref(ev))
         XFlush(self.dpy)
         return True
+
+    def keep_icons_above(self, stack):
+        """Chain the desktop windows bottom to top: the wallpaper, the icons, the logtime card (on
+        top so it can be dragged; it takes clicks on the card only).
+
+        Each is marked as transient for the one under it, and the window manager keeps a transient
+        above its parent at all times. So when the icons extension lowers its window it lands just
+        above ours, never under the wallpaper: restacking afterwards would leave a visible flicker."""
+        card = self.card.xid() if self.card is not None else None
+        desktop = self.atom("_NET_WM_WINDOW_TYPE_DESKTOP")
+        for w in stack:
+            if w in (self.win, card) or w in self.checked:
+                continue
+            self.checked.add(w)
+            if desktop in self.window_atoms(w, "_NET_WM_WINDOW_TYPE"):
+                self.icons.add(w)
+        self.checked &= set(stack)
+        self.icons &= self.checked
+        wanted = {w: self.win for w in self.icons} if self.win else {}
+        if card in stack:
+            under = [w for w in stack if w in self.icons] or [self.win]
+            if under[-1]:
+                wanted[card] = under[-1]
+        for child, parent in wanted.items():
+            if self.links.get(child) != parent:
+                value = (ctypes.c_long * 1)(parent)
+                XChangeProperty(self.dpy, child, self.atom("WM_TRANSIENT_FOR"), XA_WINDOW, 32, PROP_REPLACE,
+                                ctypes.cast(value, P), 1)
+        self.links = wanted
+        XFlush(self.dpy)
+
+    def release_icons(self):
+        """Undo keep_icons_above, when the helper stops."""
+        for w in self.icons:
+            XDeleteProperty(self.dpy, w, self.atom("WM_TRANSIENT_FOR"))
+        self.icons.clear()
+        self.links.clear()
+        XSync(self.dpy, 0)
 
     def show_picture(self, path, width, height):
         try:
@@ -531,6 +605,6 @@ def main():
     lock.write(f"{os.getpid()}\n")    # so `wallpaper-studio stop` knows whom to stop
     lock.flush()
     desktop = Desktop()
-    signal.signal(signal.SIGTERM, lambda *_: (desktop.stop_video(), os._exit(0)))
+    signal.signal(signal.SIGTERM, lambda *_: (desktop.stop_video(), desktop.release_icons(), os._exit(0)))
     GLib.MainLoop().run()
     return 0
