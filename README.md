@@ -107,18 +107,19 @@ leave it. Hide it with `nimbus logtime off`.
 ## Command line
 
 ```
-nimbus                  open the window
-nimbus set FILE         use a picture or video
-nimbus next             a random different one from your folder
-nimbus light|dark|auto  colour mode
-nimbus logtime          today's and this month's logtime as 1337 counts it, in the terminal
-nimbus logtime on|off    show or hide the desktop card
-nimbus logtime login LOGIN   follow another login than the one you're signed in with
-nimbus awake [MINUTES|on|off]   keep your session active so it doesn't lock (default 60 minutes)
-nimbus guard [off]               lock the screen on the first key or mouse move (3 s to let go first)
-nimbus stop             stop everything (stays off after logging in again); nothing is uninstalled
-nimbus start            start it again (opening the app does too)
-nimbus restore          undo everything
+nimbus                         open the window
+nimbus set FILE                use a picture or video
+nimbus next                    a random different one from your folder
+nimbus light|dark|auto         colour mode
+nimbus logtime                 today's and this month's logtime as 1337 counts it, in the terminal
+nimbus logtime on|off          show or hide the desktop card
+nimbus logtime login LOGIN     follow another login than the one you're signed in with
+nimbus awake [MINUTES|on|off]  keep your session active so it doesn't lock (default 60 minutes)
+nimbus guard [off]             lock the screen on the first key or mouse move (3 s to let go first)
+nimbus stop                    stop everything (stays off after logging in again); nothing is uninstalled
+nimbus start                   start it again (opening the app does too)
+nimbus restore                 undo everything
+nimbus uninstall               restore your original look, then remove Nimbus
 ```
 
 The installer adds a `nimbus` alias to bash, zsh and fish, so the command works in every new
@@ -127,10 +128,10 @@ terminal. In the terminal you installed from, run `source ~/.bashrc` (or `~/.zsh
 ## Uninstall
 
 ```sh
-./uninstall.sh
+nimbus uninstall
 ```
 
-It restores your original look first, then removes the app.
+It restores your original look first, then removes the app. (From a clone, `./uninstall.sh` does the same.)
 
 ## How it works
 

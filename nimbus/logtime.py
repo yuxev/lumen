@@ -14,7 +14,9 @@ import datetime
 import getpass
 import json
 import os
+import re
 import socket
+import subprocess
 import threading
 import urllib.error
 import urllib.request
@@ -95,6 +97,47 @@ def logged_in_since():
     return datetime.datetime.fromtimestamp(stamp / 1e6).astimezone() if stamp else None
 
 
+def finished_here(day, current):
+    """Seconds of this computer's desktop sessions that began on `day` and are over, exact, from its
+    own record of logins and logouts (`last`). 1337 only gives whole hours. Leaves out the session
+    running now, which began at `current`."""
+    try:
+        out = subprocess.run(["last", "--time-format", "iso", "-w", getpass.getuser()],
+                             capture_output=True, text=True, timeout=10, check=False).stdout
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    total = 0
+    for line in out.splitlines():
+        # user, terminal, display, begin, "-", end (or "down", "crash"…), (length)
+        parts = line.split()
+        if len(parts) < 5 or not parts[2].startswith(":"):     # desktop sessions only, not terminals
+            continue
+        try:
+            begin = datetime.datetime.fromisoformat(parts[3]).astimezone()
+        except ValueError:
+            continue
+        if begin.date() != day or (current and abs((begin - current).total_seconds()) < 120):
+            continue
+        try:
+            end = datetime.datetime.fromisoformat(parts[5]).astimezone() if parts[4] == "-" else None
+        except (IndexError, ValueError):
+            end = None
+        if end is None:                   # ended by a shutdown or crash: only its length is known
+            length = re.search(r"\((?:(\d+)\+)?(\d+):(\d+)\)\s*$", line)
+            if not length:                # still on, or gone without a logout: nothing to count
+                continue
+            d, h, m = (int(x or 0) for x in length.groups())
+            end = begin + datetime.timedelta(days=d, hours=h, minutes=m)
+        total += max((end - begin).total_seconds(), 0)
+    return total
+
+
+def earlier_today(hours_1337, here):
+    """Today's sessions before this one, in seconds: this computer's exact count, unless 1337 has more
+    than its rounding to whole hours explains (time on other computers), then 1337's hours."""
+    return here if hours_1337 * 3600 - here <= 1800 else hours_1337 * 3600
+
+
 # --- the maths -----------------------------------------------------------------------
 
 def period(today):
@@ -154,6 +197,7 @@ class Card(Gtk.Window):
         self.api = api                 # a Campus: 1337's logtime
         self.on_shown = on_shown
         self.total, self.days = None, {}          # 1337's hours: the period's, and each day's
+        self.here = (None, 0)                     # (day, its finished sessions on this computer, s)
         self.error, self.loaded = None, None      # loaded: the period's first day
         self.since = logged_in_since()            # this session: 1337 adds it once you log out
         self.host = socket.gethostname().split(".")[0]
@@ -377,6 +421,8 @@ class Card(Gtk.Window):
         start = period(today)[0]
 
         def work():
+            here = finished_here(today, self.since)
+            GLib.idle_add(lambda: setattr(self, "here", (today, here)) or self.redraw() or False)
             try:
                 result, error = self.api.month(today), None
             except ApiError as e:
@@ -397,6 +443,11 @@ class Card(Gtk.Window):
         self.error = error
         self.redraw()
         return False
+
+    def earlier(self, today):
+        """Today's sessions before this one, in seconds (see earlier_today)."""
+        day, here = self.here
+        return earlier_today(self.days.get(today, 0), here if day == today else 0)
 
     def tick(self):
         if self.loaded and self.loaded != period(datetime.date.today())[0]:    # a new period began
@@ -501,8 +552,7 @@ class Card(Gtk.Window):
                 cr.rectangle(width - PAD - w - 13, y - 3.5, 7, 7)
                 cr.fill()
             y += 30
-            counted = self.days.get(today, 0)
-            t = int(counted * 3600 + (live if start == today else 0))
+            t = int(self.earlier(today) + (live if start == today else 0))
             w = self.text(cr, f"{t // 3600}:{t % 3600 // 60:02d}", PAD - 2, y, 40, c["ink"], bold=True)
             self.text(cr, f":{t % 60:02d}", PAD - 2 + w, y + 6, 20, c["accent_text"], bold=True)
 
@@ -555,7 +605,8 @@ class Card(Gtk.Window):
                         continue
                     x = PAD + i * CELL
                     self.cells.append((x, y, day))
-                    seconds = self.days.get(day, 0) * 3600 + (live if day == start else 0)
+                    seconds = (self.earlier(day) if day == today else self.days.get(day, 0) * 3600) + \
+                        (live if day == start else 0)
                     shade = 0.15 + 0.85 * min(seconds / FULL_DAY, 1) if seconds else 0
                     cr.rectangle(x + 2, y + 2, CELL - 4, ROW - 4)
                     if seconds:

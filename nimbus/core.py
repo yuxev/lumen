@@ -332,10 +332,11 @@ def shell_background(still):
 
 
 def shell_picks_up_background():
-    """GNOME Shell reads SHELL_BACKGROUND_IMAGE only when it starts, so right after installing,
-    the running one doesn't have it until the next login. Hand it to the session and restart the
-    Shell the way GNOME does on X11: systemd starts it again at once, and every window stays. Only
-    on X11 and a Shell systemd restarts; on Wayland a restart would end the session."""
+    """GNOME Shell reads SHELL_BACKGROUND_IMAGE only when it starts, so right after installing (or
+    after the file moved, as when Wallpaper Studio became Nimbus), the running one doesn't have it
+    until the next login. Hand it to the session and restart the Shell the way GNOME does on X11:
+    systemd starts it again at once, and every window stays. Only on X11 and a Shell systemd
+    restarts; on Wayland a restart would end the session."""
     if os.environ.get("XDG_SESSION_TYPE") != "x11" or not shutil.which("systemctl"):
         return
     unit = "org.gnome.Shell@x11.service"
@@ -346,8 +347,9 @@ def shell_picks_up_background():
         return
     try:
         with open(f"/proc/{props.get('MainPID')}/environ", "rb") as f:
-            if b"SHELL_BACKGROUND_IMAGE=" in f.read():
-                return
+            current = f.read().split(b"\0")
+        if f"SHELL_BACKGROUND_IMAGE={SHELL_BACKGROUND}".encode() in current:
+            return
     except OSError:
         return
     subprocess.run(["systemctl", "--user", "set-environment", f"SHELL_BACKGROUND_IMAGE={SHELL_BACKGROUND}"],

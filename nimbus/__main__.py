@@ -1,22 +1,22 @@
 """nimbus — change your wallpaper and recolour your desktop from it.
 
-    nimbus                 open the window
-    nimbus set FILE        use a picture or video as the wallpaper
-    nimbus next            a random different wallpaper from your folder
-    nimbus light|dark|auto light or dark colours, or follow the clock
-    nimbus awake [MINUTES|on|off]
-                                     keep the screen from locking while you read or watch
-                                     (default 60 minutes; "on" lasts until you turn it off or log out)
-    nimbus guard [off]               lock the screen on the first key or mouse move, from 3 s after
-                                     you run it (walking away from the computer)
+    nimbus                          open the window
+    nimbus set FILE                 use a picture or video as the wallpaper
+    nimbus next                     a random different wallpaper from your folder
+    nimbus light|dark|auto          light or dark colours, or follow the system
+    nimbus awake [MINUTES|on|off]   keep the screen from locking while you read or watch
+                                    (default 60 minutes; "on" lasts until you turn it off or log out)
+    nimbus guard [off]              lock the screen on the first key or mouse move, from 3 s after
+                                    you run it (walking away from the computer)
     nimbus logtime [on|off|login LOGIN]
-                                     your logtime as 1337 counts it, also shown live on the desktop:
-                                     this session and the scholarship month (no setup needed)
-    nimbus stop            stop everything (the wallpaper, rotation, keep-awake, the window)
-                                     until you start it again; nothing is uninstalled
-    nimbus start           start it again
-    nimbus restore         put your desktop back the way it was
-    nimbus desktop         the background helper (started at login)
+                                    your logtime as 1337 counts it, also shown live on the desktop:
+                                    this session and the scholarship month (no setup needed)
+    nimbus stop                     stop everything (the wallpaper, rotation, keep-awake, the window)
+                                    until you start it again; nothing is uninstalled
+    nimbus start                    start it again
+    nimbus restore                  put your desktop back the way it was
+    nimbus uninstall                put your desktop back the way it was and remove Nimbus
+    nimbus desktop                  the background helper (started at login)
 """
 import os
 import sys
@@ -110,6 +110,14 @@ def main(argv):
         elif command == "start":
             core.start()
             print("Nimbus started.")
+        elif command == "uninstall":
+            # the copy install.sh keeps next to the app, so it works without the download or a clone
+            script = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uninstall.sh")
+            if not os.path.exists(script):
+                print("nimbus: uninstall.sh isn't here; run it from the Nimbus folder you installed from",
+                      file=sys.stderr)
+                return 1
+            os.execvp("bash", ["bash", script])
         elif command == "restore":
             core.restore()
         else:

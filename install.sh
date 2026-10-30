@@ -91,7 +91,7 @@ for _ in $(seq 50); do pgrep -f "$HELPER" >/dev/null || break; sleep 0.1; done  
 rm -rf "$DEST"
 mkdir -p "$DEST" "$HOME/.local/bin" "$HOME/.local/share/applications" \
 	"$HOME/.local/share/icons/hicolor/scalable/apps" "$HOME/.config/autostart"
-cp -r nimbus bin wallpapers "$DEST/"
+cp -r nimbus bin wallpapers uninstall.sh "$DEST/"   # uninstall.sh: for `nimbus uninstall`
 find "$DEST" -name __pycache__ -prune -exec rm -rf {} +
 # always run with the Python that has GTK, whatever python3 comes first in PATH later
 sed -i "1s|^#!.*|#!$PYTHON|" "$DEST/bin/nimbus"
