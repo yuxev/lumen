@@ -1,6 +1,6 @@
-"""Everything Nimbus changes, in one place: the wallpaper, the colours, and the way back.
+"""Everything Lumen changes, in one place: the wallpaper, the colours, and the way back.
 
-State lives in ~/.config/nimbus:
+State lives in ~/.config/lumen:
     config.json      your choices (light/dark/auto, folder, rotation, transparency)
     state.json       the wallpaper in use and its palette; the desktop helper watches this file
     originals.json   every setting as it was before the first change, for "Restore"
@@ -24,8 +24,8 @@ from gi.repository import Gio, GLib
 from . import palette
 
 HOME = os.path.expanduser("~")
-CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.join(HOME, ".config")), "nimbus")
-CACHE_DIR = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.join(HOME, ".cache")), "nimbus")
+CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.join(HOME, ".config")), "lumen")
+CACHE_DIR = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.join(HOME, ".cache")), "lumen")
 CONFIG = os.path.join(CONFIG_DIR, "config.json")
 STATE = os.path.join(CONFIG_DIR, "state.json")
 ORIGINALS = os.path.join(CONFIG_DIR, "originals.json")
@@ -37,17 +37,11 @@ APP_GLASS_CSS = os.path.join(CONFIG_DIR, "app-glass.css")     # glass for apps t
 # session at login
 SHELL_BACKGROUND = os.path.join(CACHE_DIR, "shell-background")
 SHELL_ENV = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.join(HOME, ".config")),
-                         "environment.d", "70-nimbus.conf")
+                         "environment.d", "70-lumen.conf")
 HOOKS = os.path.join(CONFIG_DIR, "hooks")
-STOPPED = os.path.join(CONFIG_DIR, "stopped")   # `nimbus stop` leaves this until `start`
+STOPPED = os.path.join(CONFIG_DIR, "stopped")   # `lumen stop` leaves this until `start`
 LOCK = os.path.join(CONFIG_DIR, ".lock")
-HELPER_LOCK = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "nimbus.lock")
-# lives in the session's runtime folder, which is emptied at logout: "keep awake" never outlives a session
-AWAKE = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "nimbus-awake.json")
-# "lock when touched": there while armed; also in the runtime folder, so it never outlives a session
-GUARD = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "nimbus-guard.json")
-GUARD_GRACE = 3          # seconds to take your hands off before it's armed
-FOREVER = -1
+HELPER_LOCK = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "lumen.lock")
 
 # wallpapers that come with the app, shown until you pick a folder of your own
 BUILT_IN = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "wallpapers")
@@ -76,7 +70,7 @@ TOUCHED = [
     ("org.gnome.desktop.screensaver", "picture-uri"),
 ]
 TERMINAL = "/org/gnome/terminal/legacy/profiles:"
-CSS_IMPORT = '@import url("file://{}"); /* nimbus */\n'
+CSS_IMPORT = '@import url("file://{}"); /* lumen */\n'
 
 
 def is_video(path):
@@ -143,40 +137,6 @@ def helper_running():
         return True
 
 
-def awake_until():
-    """When "keep screen awake" ends: a timestamp, FOREVER, or None when it's off."""
-    until = _read_json(AWAKE, {}).get("until")
-    if until is None or until == FOREVER or until > time.time():
-        return until
-    return None
-
-
-def awake_minutes():
-    """The length chosen for the current "keep awake", or None when it's off."""
-    return _read_json(AWAKE, {}).get("minutes") if awake_until() is not None else None
-
-
-def keep_awake(minutes):
-    """Stop the screen locking from idleness for this many minutes (FOREVER: until turned off, None: off now).
-
-    The desktop helper holds GNOME's own idle inhibitor, as video players do; it ends at logout."""
-    until = None if minutes is None else FOREVER if minutes == FOREVER else time.time() + minutes * 60
-    _write(AWAKE, json.dumps({"until": until, "minutes": minutes}) + "\n")
-    if minutes is not None:
-        start()          # the helper holds the inhibitor
-
-
-def guard(on):
-    """Lock the screen the moment anyone touches the keyboard or mouse, after GUARD_GRACE seconds to
-    let go. The helper watches for it, locks with 42's own lock screen, and disarms itself."""
-    if on:
-        _write(GUARD, json.dumps({"armed": time.time()}) + "\n")
-        start()          # the helper does the watching
-    else:
-        with contextlib.suppress(FileNotFoundError):
-            os.remove(GUARD)
-
-
 def start():
     """Run again after `stop`: the wallpaper, rotation and light/dark come back, also at every login."""
     with contextlib.suppress(FileNotFoundError):
@@ -185,7 +145,7 @@ def start():
 
 
 def stop():
-    """Stop everything that runs (the wallpaper on the desktop, rotation, keep-awake, the window) without
+    """Stop everything that runs (the wallpaper on the desktop, rotation, the window) without
     uninstalling. It stays stopped, even after logging in again, until `start` or opening the app.
     Returns whether anything was running."""
     os.makedirs(CONFIG_DIR, exist_ok=True)
@@ -193,7 +153,7 @@ def stop():
     was_running = False
     try:     # the window, if it's open
         Gio.bus_get_sync(Gio.BusType.SESSION, None).call_sync(
-            "io.github.yuxev.Nimbus", "/io/github/yuxev/Nimbus", "org.gtk.Actions", "Activate",
+            "io.github.yuxev.Lumen", "/io/github/yuxev/Lumen", "org.gtk.Actions", "Activate",
             GLib.Variant("(sava{sv})", ("quit", [], {})), None, Gio.DBusCallFlags.NO_AUTO_START, 2000, None)
         was_running = True
     except GLib.Error:
@@ -218,7 +178,7 @@ def start_helper():
     if not helper_running():
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         # by its full path, so install.sh can tell this install's helper from any other
-        subprocess.Popen([sys.executable, os.path.join(root, "bin", "nimbus"), "desktop"], cwd=root,
+        subprocess.Popen([sys.executable, os.path.join(root, "bin", "lumen"), "desktop"], cwd=root,
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                          start_new_session=True)
 
@@ -333,8 +293,8 @@ def shell_background(still):
 
 def shell_picks_up_background():
     """GNOME Shell reads SHELL_BACKGROUND_IMAGE only when it starts, so right after installing (or
-    after the file moved, as when Wallpaper Studio became Nimbus), the running one doesn't have it
-    until the next login. Hand it to the session and restart the Shell the way GNOME does on X11:
+    after the file moved), the running one doesn't have it until the next login. Hand it to the
+    session and restart the Shell the way GNOME does on X11:
     systemd starts it again at once, and every window stays. Only on X11 and a Shell systemd
     restarts; on Wayland a restart would end the session."""
     if os.environ.get("XDG_SESSION_TYPE") != "x11" or not shutil.which("systemctl"):
@@ -401,7 +361,7 @@ THEMES_DIR = os.path.join(HOME, ".local/share/themes")
 # GTK re-reads a theme's files only when the theme *name* changes (and never re-reads gtk.css), so the
 # colours live in a small theme of our own and every recolour flips between two identical copies of it:
 # one setting change, and every running GTK 3 app restyles itself on the spot
-OUR_THEMES = ("Nimbus A", "Nimbus B")
+OUR_THEMES = ("Lumen A", "Lumen B")
 
 
 def _theme_dir(name):
@@ -421,7 +381,7 @@ def _write_themes(dark):
     for name in OUR_THEMES:
         d = os.path.join(THEMES_DIR, name)
         _write(os.path.join(d, "index.theme"), f"[X-GNOME-Metatheme]\nName={name}\nType=X-GNOME-Metatheme\n"
-                                               "Comment=Made by Nimbus from your wallpaper\n")
+                                               "Comment=Made by Lumen from your wallpaper\n")
         for version, base in (("gtk-3.0", base3), ("gtk-4.0", base4)):
             css = f'@import url("{base}");\n@import url("{colours}");\n'
             _write(os.path.join(d, version, "gtk.css"), css)
@@ -443,7 +403,7 @@ def _add_import(gtk_css, css=THEME_CSS):
         text = ""
     if line in text:
         return
-    kept = "".join(l for l in text.splitlines(True) if "/* nimbus */" not in l)
+    kept = "".join(l for l in text.splitlines(True) if "/* lumen */" not in l)
     _write(gtk_css, line + kept)
 
 
@@ -453,7 +413,7 @@ def _remove_import(gtk_css):
             text = f.read()
     except OSError:
         return
-    kept = "".join(l for l in text.splitlines(True) if "/* nimbus */" not in l)
+    kept = "".join(l for l in text.splitlines(True) if "/* lumen */" not in l)
     if kept.strip():
         _write(gtk_css, kept)
     else:
@@ -468,7 +428,7 @@ def _reload_gtk(theme):
 
 
 def _terminal_profile(p):
-    """A 'Nimbus' profile in GNOME Terminal, made the default."""
+    """A 'Lumen' profile in GNOME Terminal, made the default."""
     uid_file = os.path.join(CONFIG_DIR, "terminal-profile")
     try:
         with open(uid_file) as f:
@@ -486,7 +446,7 @@ def _terminal_profile(p):
     _dconf("write", f"{TERMINAL}/default", f"'{uid}'")
     path = f"{TERMINAL}/:{uid}/"
     for key, value in {
-        "visible-name": "'Nimbus'", "use-theme-colors": "false",
+        "visible-name": "'Lumen'", "use-theme-colors": "false",
         "background-color": f"'{p['paper']}'", "foreground-color": f"'{p['ink']}'",
         "bold-color-same-as-fg": "true", "palette": str(p["ansi"]),
         "cursor-colors-set": "true", "cursor-background-color": f"'{p['accent']}'",
@@ -511,7 +471,7 @@ def apply_theme():
         _write(THEME_CSS, palette.gtk_css(p, dark, config["glass"]))
         _write_themes(dark)
         # GTK 3 apps take the colours from the theme, live. libadwaita apps ignore themes and only
-        # read gtk-4.0/gtk.css when they start, so it imports the colours too (the Nimbus
+        # read gtk-4.0/gtk.css when they start, so it imports the colours too (the Lumen
         # window reloads it itself). A gtk-3.0 import of the colours would pin GTK 3 apps to their
         # start-up colours, so with glass on it imports only rules that name the theme's colours.
         gtk3 = os.path.join(HOME, ".config", "gtk-3.0", "gtk.css")
@@ -536,16 +496,16 @@ def apply_theme():
 
 
 def _run_hooks(p, mode):
-    """Your own scripts in ~/.config/nimbus/hooks run after every recolour (see README).
+    """Your own scripts in ~/.config/lumen/hooks run after every recolour (see README).
 
-    Each executable file there gets the palette in NIMBUS_* variables and runs in the background."""
+    Each executable file there gets the palette in LUMEN_* variables and runs in the background."""
     try:
         names = sorted(os.listdir(HOOKS))
     except OSError:
         return
-    env = {**os.environ, "NIMBUS_MODE": mode, "NIMBUS_STATE": STATE}
-    env.update({f"NIMBUS_{k.upper()}": v for k, v in p.items() if k != "ansi"})
-    env.update({f"NIMBUS_ANSI_{i}": c for i, c in enumerate(p["ansi"])})
+    env = {**os.environ, "LUMEN_MODE": mode, "LUMEN_STATE": STATE}
+    env.update({f"LUMEN_{k.upper()}": v for k, v in p.items() if k != "ansi"})
+    env.update({f"LUMEN_ANSI_{i}": c for i, c in enumerate(p["ansi"])})
     for name in names:
         path = os.path.join(HOOKS, name)
         if not name.startswith(".") and os.path.isfile(path) and os.access(path, os.X_OK):
@@ -554,7 +514,7 @@ def _run_hooks(p, mode):
 
 
 def restore():
-    """Put back every setting as it was before Nimbus, and take the wallpaper away."""
+    """Put back every setting as it was before Lumen, and take the wallpaper away."""
     with locked():
         saved = _read_json(ORIGINALS, None)
         if saved:

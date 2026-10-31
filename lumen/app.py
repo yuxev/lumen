@@ -1,4 +1,4 @@
-"""The Nimbus window: pick a wallpaper, see its colours, choose light or dark."""
+"""The Lumen window: pick a wallpaper, see its colours, choose light or dark."""
 import concurrent.futures
 import os
 import threading
@@ -12,13 +12,11 @@ from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
 
 from . import core  # noqa: E402
 
-APP_ID = "io.github.yuxev.Nimbus"
+APP_ID = "io.github.yuxev.Lumen"
 THUMB_W, THUMB_H = 480, 270          # pixels on disk; shown at half size, sharp on HiDPI screens
 ROTATIONS = [(0, "Never"), (1, "Every hour"), (3, "Every 3 hours"), (5, "Every 5 hours"),
              (12, "Every 12 hours"), (24, "Once a day")]
 SWATCHES = ["paper", "sheet", "ink", "muted", "accent"]
-AWAKE_CHOICES = [(None, "Off"), (30, "For 30 minutes"), (60, "For 1 hour"), (120, "For 2 hours"),
-                 (core.FOREVER, "Until I turn it off")]
 
 CSS = b"""
 .thumb { padding: 0; border-radius: 10px; }
@@ -76,11 +74,10 @@ def swatch(colour):
 
 class Window(Adw.ApplicationWindow):
     def __init__(self, app):
-        super().__init__(application=app, title="Nimbus", default_width=900, default_height=780)
+        super().__init__(application=app, title="Lumen", default_width=900, default_height=780)
         self.pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
         self.thumbs = {}            # path -> button in the grid
         self.busy = False
-        self.showing_awake = False
         self.config = core.load_config()
 
         self.toasts = Adw.ToastOverlay()
@@ -120,7 +117,7 @@ class Window(Adw.ApplicationWindow):
 
         menu = Gio.Menu()
         menu.append("Restore original look", "win.restore")
-        menu.append("About Nimbus", "win.about")
+        menu.append("About Lumen", "win.about")
         header.pack_end(Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, tooltip_text="Menu"))
         for name, handler in (("restore", self.ask_restore), ("about", self.about)):
             action = Gio.SimpleAction.new(name, None)
@@ -190,7 +187,7 @@ class Window(Adw.ApplicationWindow):
         mode_row.add_suffix(modes)
         look.add(mode_row)
         look.add(self.switch_row("See-through windows", "Let the wallpaper show behind app windows", "glass"))
-        look.add(self.switch_row("Recolour the Terminal", "Adds a “Nimbus” profile to GNOME Terminal",
+        look.add(self.switch_row("Recolour the Terminal", "Adds a “Lumen” profile to GNOME Terminal",
                                  "terminal"))
         box.append(look)
 
@@ -203,52 +200,7 @@ class Window(Adw.ApplicationWindow):
         auto.add(combo)
         box.append(auto)
 
-        screen = Adw.PreferencesGroup(title="Screen")
-        self.awake_row = Adw.ComboRow(title="Keep screen awake",
-                                      model=Gtk.StringList.new([label for _m, label in AWAKE_CHOICES]))
-        self.awake_row.connect("notify::selected", self.on_awake)
-        screen.add(self.awake_row)
-        guard = Adw.ActionRow(title="Lock when touched",
-                              subtitle=f"Walking away? Arm it, take your hands off, and {core.GUARD_GRACE} s later "
-                                       "the first key or mouse move locks the screen")
-        arm = Gtk.Button(label="Arm", valign=Gtk.Align.CENTER)
-        arm.connect("clicked", self.on_guard)
-        guard.add_suffix(arm)
-        screen.add(guard)
-        box.append(screen)
-        self.show_awake()
-        GLib.timeout_add_seconds(30, self.show_awake)     # count down, and notice when it runs out
         return box
-
-    def on_guard(self, _button):
-        core.guard(True)
-        self.toasts.add_toast(Adw.Toast(title=f"Hands off: armed in {core.GUARD_GRACE} s", timeout=core.GUARD_GRACE))
-
-    def on_awake(self, row, _param):
-        if self.showing_awake:
-            return
-        core.keep_awake(AWAKE_CHOICES[row.get_selected()][0])
-        self.show_awake()
-
-    def show_awake(self):
-        """Show whether "keep awake" is on and until when; it ends at logout either way."""
-        until = core.awake_until()
-        self.showing_awake = True
-        if until is None:
-            self.awake_row.set_selected(0)
-            self.awake_row.set_subtitle("The screen locks after you've been away for a while, as usual")
-        elif until == core.FOREVER:
-            self.awake_row.set_selected(len(AWAKE_CHOICES) - 1)
-            self.awake_row.set_subtitle("Your session counts as active until you turn it off or log out. "
-                                        "Lock it yourself (Super+L) when you walk away")
-        else:
-            choices = [m for m, _l in AWAKE_CHOICES]
-            minutes = core.awake_minutes()
-            self.awake_row.set_selected(choices.index(minutes) if minutes in choices else 2)
-            self.awake_row.set_subtitle(GLib.DateTime.new_from_unix_local(int(until)).format(
-                "Your session counts as active until %H:%M. Lock it yourself (Super+L) when you walk away"))
-        self.showing_awake = False
-        return True
 
     def switch_row(self, title, subtitle, key):
         row = Adw.ActionRow(title=title, subtitle=subtitle)
@@ -428,7 +380,7 @@ class Window(Adw.ApplicationWindow):
         dialog.present()
 
     def about(self, *_):
-        Gtk.AboutDialog(transient_for=self, modal=True, program_name="Nimbus", logo_icon_name=APP_ID,
+        Gtk.AboutDialog(transient_for=self, modal=True, program_name="Lumen", logo_icon_name=APP_ID,
                         comments="Change your wallpaper and recolour your desktop to match it.",
                         version="1.0", license_type=Gtk.License.MIT_X11).present()
 
@@ -452,10 +404,10 @@ class App(Adw.Application):
         self.css_monitor = Gio.File.new_for_path(core.THEME_CSS).monitor_file(Gio.FileMonitorFlags.NONE, None)
         self.css_monitor.connect("changed", lambda *_: GLib.timeout_add(150, self.reload_user_css))
         self.reload_user_css()
-        quit_action = Gio.SimpleAction.new("quit", None)     # used by `nimbus stop`
+        quit_action = Gio.SimpleAction.new("quit", None)     # used by `lumen stop`
         quit_action.connect("activate", lambda *_: self.quit())
         self.add_action(quit_action)
-        core.start()     # opening the app undoes `nimbus stop`
+        core.start()     # opening the app undoes `lumen stop`
 
     def reload_user_css(self):
         gtk_css = os.path.join(core.HOME, ".config", "gtk-4.0", "gtk.css")
@@ -470,5 +422,5 @@ class App(Adw.Application):
 def main():
     # so GNOME matches the window to its launcher (name and icon in the top bar), not "python3"
     GLib.set_prgname(APP_ID)
-    GLib.set_application_name("Nimbus")
+    GLib.set_application_name("Lumen")
     return App().run(None)

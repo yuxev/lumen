@@ -30,7 +30,7 @@ from gi.repository import Gdk, GdkPixbuf, Gio, GLib  # noqa: E402
 
 from . import core  # noqa: E402
 
-VLC_SOCKET = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "nimbus-vlc.sock")
+VLC_SOCKET = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "lumen-vlc.sock")
 
 # --- just enough Xlib ---------------------------------------------------------------
 
@@ -104,26 +104,6 @@ class XEvent(ctypes.Union):
 
 XSendEvent = _sig("XSendEvent", ctypes.c_int, P, XID, ctypes.c_int, ctypes.c_long, ctypes.POINTER(XEvent))
 XSelectInput = _sig("XSelectInput", ctypes.c_int, P, XID, ctypes.c_long)
-Xss = ctypes.CDLL(ctypes.util.find_library("Xss"))
-
-
-class XScreenSaverInfo(ctypes.Structure):
-    _fields_ = [("window", XID), ("state", ctypes.c_int), ("kind", ctypes.c_int),
-                ("til_or_since", ctypes.c_ulong), ("idle", ctypes.c_ulong), ("eventMask", ctypes.c_ulong)]
-
-
-Xss.XScreenSaverAllocInfo.restype = ctypes.POINTER(XScreenSaverInfo)
-Xss.XScreenSaverQueryInfo.restype = ctypes.c_int
-Xss.XScreenSaverQueryInfo.argtypes = [P, XID, ctypes.POINTER(XScreenSaverInfo)]
-XTest = ctypes.CDLL(ctypes.util.find_library("Xtst"))
-XTest.XTestFakeRelativeMotionEvent.restype = ctypes.c_int
-XTest.XTestFakeRelativeMotionEvent.argtypes = [P, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
-NUDGE_SECONDS = 50       # idle checks typically look once a minute
-GUARD_POLL_MS = 50       # how often "lock when touched" looks at the idle time
-OWN_INPUT = 0.3          # seconds after one of our own nudges in which an idle reset is ours
-IDLE_JITTER = 10         # ms the X server's idle time can go back by on its own, without any input
-# what 42's own lock button runs (lockscreen@42network.org)
-LOCK = ["/usr/bin/env", "XDG_SEAT_PATH=/org/freedesktop/DisplayManager/Seat0", "dm-tool", "switch-to-greeter"]
 CLIENT_MESSAGE = 33
 PROPERTY_NOTIFY = 28
 PROPERTY_CHANGE_MASK = 1 << 22
@@ -170,7 +150,7 @@ class Desktop:
     def __init__(self):
         self.dpy = XOpenDisplay(None)
         if not self.dpy:
-            raise SystemExit("nimbus: no X display (Wayland sessions aren't supported)")
+            raise SystemExit("lumen: no X display (Wayland sessions aren't supported)")
         self.screen = XDefaultScreen(self.dpy)
         self.root = XRootWindow(self.dpy, self.screen)
         self.depth = XDefaultDepth(self.dpy, self.screen)
@@ -183,13 +163,6 @@ class Desktop:
         self.paused = False
         self.pending = 0
         self.busy = None             # a rotation or light/dark change running in the background
-        self.inhibit_cookie = None   # held while "keep screen awake" is on
-        self.awake_timer = 0
-        self.nudge_timer = 0         # pointer nudges while "keep screen awake" is on
-        self.own_input_until = 0     # monotonic time until which an idle reset was our own nudge
-        self.idle_info = Xss.XScreenSaverAllocInfo()
-        self.guard_timer = 0         # "lock when touched": the grace period, then the watch
-        self.guard_idle = None       # the idle time last seen while armed (ms)
         try:
             self.session = Gio.DBusProxy.new_for_bus_sync(
                 Gio.BusType.SYSTEM, Gio.DBusProxyFlags.NONE, None, "org.freedesktop.login1",
@@ -200,12 +173,6 @@ class Desktop:
         os.makedirs(core.CONFIG_DIR, exist_ok=True)
         self.monitor = Gio.File.new_for_path(core.CONFIG_DIR).monitor_directory(Gio.FileMonitorFlags.NONE, None)
         self.monitor.connect("changed", self.on_change)
-        self.awake_monitor = Gio.File.new_for_path(core.AWAKE).monitor_file(Gio.FileMonitorFlags.NONE, None)
-        self.awake_monitor.connect("changed", lambda *_: GLib.timeout_add(200, self.sync_awake))
-        GLib.idle_add(self.sync_awake)
-        self.guard_monitor = Gio.File.new_for_path(core.GUARD).monitor_file(Gio.FileMonitorFlags.NONE, None)
-        self.guard_monitor.connect("changed", lambda *_: GLib.timeout_add(100, self.sync_guard))
-        GLib.idle_add(self.sync_guard)
         # the desktop-icons extension lowers its window under everything whenever any window (even a
         # tooltip) opens or closes, which hides the icons under the wallpaper; watch the stacking order
         # to claim new icon windows (see keep_icons_above), and step back under the icons if one still
@@ -281,112 +248,6 @@ class Desktop:
             self.card = logtime.Card(source, self.on_restacked)
         return False
 
-    # --- keep screen awake -----------------------------------------------------------------
-
-    def sync_awake(self):
-        """Hold GNOME's idle inhibitor exactly while "keep screen awake" is on; release it when it ends."""
-        if self.awake_timer:
-            GLib.source_remove(self.awake_timer)
-            self.awake_timer = 0
-        until = core.awake_until()
-        if until is None:
-            self.uninhibit()
-            if self.nudge_timer:
-                GLib.source_remove(self.nudge_timer)
-                self.nudge_timer = 0
-            return False
-        self.inhibit()
-        if not self.nudge_timer:
-            self.nudge()
-            self.nudge_timer = GLib.timeout_add_seconds(NUDGE_SECONDS, self.nudge)
-        if until != core.FOREVER:
-            self.awake_timer = GLib.timeout_add_seconds(max(1, int(until - time.time()) + 1), self.sync_awake)
-        return False
-
-    def nudge(self):
-        """Move the pointer 1 px and straight back. GNOME's inhibitor only stops GNOME going idle; a
-        lock that reads the X server's own idle time (time since the last input) needs real input,
-        and XTest input counts as real."""
-        self.own_input_until = time.monotonic() + OWN_INPUT      # not a touch: see watch_guard
-        XTest.XTestFakeRelativeMotionEvent(self.dpy, 1, 0, 0)
-        XFlush(self.dpy)
-        GLib.timeout_add(50, self.nudge_back)
-        return True
-
-    def nudge_back(self):
-        self.own_input_until = time.monotonic() + OWN_INPUT
-        XTest.XTestFakeRelativeMotionEvent(self.dpy, -1, 0, 0)
-        XFlush(self.dpy)
-        return False
-
-    # --- lock when touched -----------------------------------------------------------------
-
-    def idle_ms(self):
-        """Time since the last keyboard or mouse input, as the X server counts it."""
-        Xss.XScreenSaverQueryInfo(self.dpy, self.root, self.idle_info)
-        return self.idle_info.contents.idle
-
-    def sync_guard(self):
-        """Start watching GUARD_GRACE seconds after it's armed; stop when it's disarmed."""
-        armed = os.path.exists(core.GUARD)
-        if armed and not self.guard_timer:
-            self.guard_idle = None
-            self.guard_timer = GLib.timeout_add_seconds(core.GUARD_GRACE, self.arm_guard)
-        elif not armed and self.guard_timer:
-            GLib.source_remove(self.guard_timer)
-            self.guard_timer = 0
-        return False
-
-    def arm_guard(self):
-        # the baseline is taken after the grace period, so the click or key that armed it can't count
-        self.guard_idle = self.idle_ms()
-        self.guard_timer = GLib.timeout_add(GUARD_POLL_MS, self.watch_guard)
-        return False
-
-    def watch_guard(self):
-        """Any input resets the X server's idle time; when it goes down, someone touched something.
-        Our own keep-awake nudges reset it too, so a reset right after one of them doesn't count."""
-        idle = self.idle_ms()
-        touched = idle + IDLE_JITTER < self.guard_idle and time.monotonic() > self.own_input_until
-        self.guard_idle = idle
-        if not touched:
-            return True
-        self.guard_timer = 0
-        core.guard(False)
-        try:
-            subprocess.Popen(LOCK, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except OSError:
-            pass
-        return False
-
-    def session_manager(self):
-        return Gio.DBusProxy.new_for_bus_sync(
-            Gio.BusType.SESSION, Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES, None, "org.gnome.SessionManager",
-            "/org/gnome/SessionManager", "org.gnome.SessionManager", None)
-
-    def inhibit(self):
-        if self.inhibit_cookie is not None:
-            return
-        try:
-            # flag 8 = "idle": the session isn't marked idle, so the screen doesn't blank or lock by itself.
-            # GNOME drops it on its own if this process ever goes away.
-            reply = self.session_manager().call_sync(
-                "Inhibit", GLib.Variant("(susu)", ("io.github.yuxev.Nimbus", 0, "Keeping the screen awake", 8)),
-                Gio.DBusCallFlags.NONE, -1, None)
-            self.inhibit_cookie = reply.unpack()[0]
-        except GLib.Error:
-            self.inhibit_cookie = None
-
-    def uninhibit(self):
-        if self.inhibit_cookie is None:
-            return
-        try:
-            self.session_manager().call_sync("Uninhibit", GLib.Variant("(u)", (self.inhibit_cookie,)),
-                                             Gio.DBusCallFlags.NONE, -1, None)
-        except GLib.Error:
-            pass
-        self.inhibit_cookie = None
-
     # --- schedule ----------------------------------------------------------------------
 
     def tick(self):
@@ -412,7 +273,7 @@ class Desktop:
 
     def run(self, command):
         # in a child process: a video's still frame can take a few seconds to read
-        self.busy = subprocess.Popen([sys.executable, "-m", "nimbus", command],
+        self.busy = subprocess.Popen([sys.executable, "-m", "lumen", command],
                                      cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -429,7 +290,7 @@ class Desktop:
     def ensure_window(self, width, height):
         if self.win is None:
             self.win = XCreateSimpleWindow(self.dpy, self.root, 0, 0, width, height, 0, 0, 0)
-            XStoreName(self.dpy, self.win, b"nimbus")
+            XStoreName(self.dpy, self.win, b"lumen")
             self.set_atoms("_NET_WM_WINDOW_TYPE", ["_NET_WM_WINDOW_TYPE_DESKTOP"])
             self.set_atoms("_NET_WM_STATE", ["_NET_WM_STATE_STICKY", "_NET_WM_STATE_BELOW",
                                              "_NET_WM_STATE_SKIP_TASKBAR", "_NET_WM_STATE_SKIP_PAGER"])
@@ -706,10 +567,10 @@ def main():
     else:
         return 0          # another helper is running
     if os.path.exists(core.STOPPED):
-        return 0          # `nimbus stop`: stay off, even at login, until `start`
+        return 0          # `lumen stop`: stay off, even at login, until `start`
     lock.seek(0)
     lock.truncate()
-    lock.write(f"{os.getpid()}\n")    # so `nimbus stop` knows whom to stop
+    lock.write(f"{os.getpid()}\n")    # so `lumen stop` knows whom to stop
     lock.flush()
     desktop = Desktop()
     signal.signal(signal.SIGTERM, lambda *_: (desktop.stop_video(), desktop.release_icons(),
